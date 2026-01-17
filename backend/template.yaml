@@ -1,0 +1,314 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Glass Box Collaborative Canvas Backend
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        CANVAS_TABLE: !Ref CanvasTable
+        NODES_TABLE: !Ref NodesTable
+        FILES_BUCKET: !Ref FilesBucket
+        USER_POOL_ID: !Ref UserPool
+
+Resources:
+  # Cognito User Pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: GlassBoxUserPool
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: GlassBoxClient
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  # DynamoDB Tables
+  CanvasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GlassBoxCanvasTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  NodesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GlassBoxNodesTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # S3 Bucket
+  FilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub glassbox-files-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+
+  # API Gateway HTTP API
+  ApiGateway:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
+            IdentitySource: "$request.header.Authorization"
+        DefaultAuthorizer: CognitoAuthorizer
+
+  # Lambda Functions
+  CreateCanvasFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxCreateCanvas
+      CodeUri: src/
+      Handler: handlers.canvases.create_canvas
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /canvases
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CanvasTable
+
+  JoinCanvasFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxJoinCanvas
+      CodeUri: src/
+      Handler: handlers.canvases.join_canvas
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /canvases/join
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CanvasTable
+
+  ListCanvasesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxListCanvases
+      CodeUri: src/
+      Handler: handlers.canvases.list_canvases
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: get
+            Path: /canvases
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  GetNodesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxGetNodes
+      CodeUri: src/
+      Handler: handlers.nodes.get_nodes
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: get
+            Path: /nodes
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  CreateNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxCreateNode
+      CodeUri: src/
+      Handler: handlers.nodes.create_node
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /nodes
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  UpdateNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxUpdateNode
+      CodeUri: src/
+      Handler: handlers.nodes.update_node
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: patch
+            Path: /nodes/{nodeId}
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  DeleteNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxDeleteNode
+      CodeUri: src/
+      Handler: handlers.nodes.delete_node
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: delete
+            Path: /nodes/{nodeId}
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource: !Sub arn:${AWS::Partition}:s3:::${FilesBucket}/*
+
+  PresignFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxPresignFile
+      CodeUri: src/
+      Handler: handlers.files.presign_file
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /files/presign
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+        - S3WritePolicy:
+            BucketName: !Ref FilesBucket
+
+  CompleteFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxCompleteFile
+      CodeUri: src/
+      Handler: handlers.files.complete_file
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /files/complete
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway HTTP API URL
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+  FilesBucketName:
+    Description: S3 Bucket for file uploads
+    Value: !Ref FilesBucket
