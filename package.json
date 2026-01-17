@@ -1,0 +1,21 @@
+{
+  "name": "glass-box",
+  "version": "1.0.0",
+  "description": "A transparent workspace that lets you explore work the way you explore a log file",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": [
+    "productivity",
+    "workspace",
+    "execution-log",
+    "collaboration"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}
