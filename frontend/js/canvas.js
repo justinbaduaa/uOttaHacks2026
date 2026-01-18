@@ -138,6 +138,10 @@ const Canvas = {
     isLoadingNodes: false,
     isCreatingCanvas: false,
     createCanvasError: null,
+    isJoiningCanvas: false,
+    isShowingCode: false,
+    myCanvases: [],
+    sharedCanvases: [],
     canvasesError: null,
     isNodeCreateSubmitting: false,
     isNodeDeleteSubmitting: false,
@@ -178,7 +182,24 @@ const Canvas = {
     this.nodeDeleteConfirm = document.getElementById('nodeDeleteConfirm');
     this.nodeDeleteError = document.getElementById('nodeDeleteError');
     this.nodeDeleteLabel = document.getElementById('nodeDeleteLabel');
+    this.nodeDeleteLabel = document.getElementById('nodeDeleteLabel');
     this.canvasToast = document.getElementById('canvasToast');
+
+    // Join Canvas Elements
+    this.canvasJoinToggle = document.getElementById('canvasJoinToggle');
+    this.canvasJoinForm = document.getElementById('canvasJoinForm');
+    this.canvasJoinInput = document.getElementById('canvasJoinInput');
+    this.canvasJoinSubmit = document.getElementById('canvasJoinSubmit');
+    this.canvasJoinCancel = document.getElementById('canvasJoinCancel');
+    this.canvasJoinError = document.getElementById('canvasJoinError');
+    this.canvasActions = document.querySelector('.canvas-actions');
+
+    // Canvas Code Elements
+    this.canvasCode = document.getElementById('canvasCode');
+    this.canvasCodeToggle = document.getElementById('canvasCodeToggle');
+    this.canvasCodePanel = document.getElementById('canvasCodePanel');
+    this.canvasCodeValue = document.getElementById('canvasCodeValue');
+    this.canvasCodeHint = document.getElementById('canvasCodeHint');
 
     this.setupEventListeners();
     this.updateProfile();
@@ -272,11 +293,54 @@ const Canvas = {
       }
     });
 
+    // Join Canvas Listeners
+    if (this.canvasJoinToggle) {
+      this.canvasJoinToggle.addEventListener('click', () => this.openJoinCanvas());
+    }
+    if (this.canvasJoinSubmit) {
+      this.canvasJoinSubmit.addEventListener('click', () => this.submitJoinCanvas());
+    }
+    if (this.canvasJoinCancel) {
+      this.canvasJoinCancel.addEventListener('click', () => this.closeJoinCanvas());
+    }
+    if (this.canvasJoinInput) {
+      this.canvasJoinInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.submitJoinCanvas();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeJoinCanvas();
+        }
+      });
+    }
+
+    // Canvas Code Listeners
+    if (this.canvasCodeToggle) {
+      this.canvasCodeToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleCodePanel();
+      });
+    }
+
     document.addEventListener('click', (e) => {
-      if (!this.state.isCreatingCanvas) return;
-      if (this.canvasCreate && !this.canvasCreate.contains(e.target)) {
+      if (this.state.isCreatingCanvas && this.canvasActions && !this.canvasActions.contains(e.target)) {
         this.closeCreateCanvas();
       }
+      if (this.state.isJoiningCanvas && this.canvasActions && !this.canvasActions.contains(e.target)) {
+        this.closeJoinCanvas();
+      }
+      if (this.state.isShowingCode && this.canvasCode && !this.canvasCode.contains(e.target)) {
+        this.closeCodePanel();
+      }
+      if (!this.nodeCreatePopover || this.nodeCreatePopover.contains(e.target)) {
+        return;
+      }
+      if (this.state.isNodeCreateSubmitting) {
+        return;
+      }
+      this.hideNodeCreatePopover(true);
     });
 
     if (this.nodeCreateConfirm) {
@@ -580,50 +644,78 @@ const Canvas = {
       return;
     }
 
-    if (this.state.canvases.length === 0) {
-      this.sidebarList.innerHTML = `
-        <div class="canvas-list-message">No canvases yet.</div>
-      `;
-      return;
-    }
-
-    this.sidebarList.innerHTML = this.state.canvases.map(canvas => {
-      const selected = canvas.id === this.state.selectedCanvasId;
-      return `
-        <button class="box-item ${selected ? 'selected' : ''}" data-id="${canvas.id}">
-          <span class="box-dot"></span>
-          <span class="box-name">${this.escapeHtml(canvas.name)}</span>
-          <span class="box-chevron">
-            <i data-lucide="chevron-right" width="12" height="12"></i>
-          </span>
-        </button>
-      `;
-    }).join('');
+    const mySection = this.renderCanvasSection(
+      'My Canvases',
+      this.state.myCanvases,
+      'No canvases yet.'
+    );
+    const sharedSection = this.renderCanvasSection(
+      'Shared Canvases',
+      this.state.sharedCanvases,
+      'No shared canvases yet.'
+    );
+    this.sidebarList.innerHTML = `${mySection}${sharedSection}`;
     // Re-render icons after DOM update
     if (window.lucide) window.lucide.createIcons();
   },
 
+  renderCanvasSection(title, canvases, emptyMessage) {
+    let items = '';
+    if (canvases.length > 0) {
+      items = canvases.map(canvas => {
+        const selected = canvas.id === this.state.selectedCanvasId;
+        return `
+          <button class="box-item ${selected ? 'selected' : ''}" data-id="${canvas.id}">
+            <span class="box-dot"></span>
+            <span class="box-name">${this.escapeHtml(canvas.name)}</span>
+            <span class="box-chevron">
+              <i data-lucide="chevron-right" width="12" height="12"></i>
+            </span>
+          </button>
+        `;
+      }).join('');
+    } else {
+      items = `<div class="canvas-list-message">${this.escapeHtml(emptyMessage)}</div>`;
+    }
+
+    return `
+      <div class="sidebar-section-title">${this.escapeHtml(title)}</div>
+      <div class="canvas-list-group">
+        ${items}
+      </div>
+    `;
+  },
   async loadCanvases() {
     this.state.isLoadingCanvases = true;
-    this.state.canvasesError = null;
     this.renderSidebar();
 
     try {
       const canvases = await Api.listCanvases();
-      const normalized = (canvases || []).map(canvas => ({
-        id: canvas.canvasId,
-        name: canvas.name || 'Untitled Canvas',
-        joinedAt: canvas.joinedAt || canvas.createdAt || '',
+      const normalized = (canvases || []).map(c => ({
+        id: c.canvasId,
+        name: c.name,
+        joinedAt: c.joinedAt,
+        ownerSub: c.ownerSub, // crucial for partitioning
+        joinCode: c.joinCode,
+        isShared: c.isShared,
       }));
-
-      normalized.sort((a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || ''));
       this.state.canvases = normalized;
+      this.partitionCanvases();
       this.state.isLoadingCanvases = false;
       this.renderSidebar();
+      this.updateCodePanel();
 
       if (normalized.length > 0) {
-        await this.selectCanvas(normalized[0].id);
+        const preferred = this.state.myCanvases[0] || this.state.sharedCanvases[0];
+        if (preferred) {
+          await this.selectCanvas(preferred.id);
+        }
       } else {
+        this.state.selectedCanvasId = null;
+        this.stopPolling();
+        this.updateBreadcrumb();
+        this.closeCodePanel();
+        this.updateCodePanel();
         this.renderNodes([]);
       }
     } catch (error) {
@@ -631,6 +723,35 @@ const Canvas = {
       this.state.canvasesError = error.message || 'Failed to load canvases';
       this.renderSidebar();
     }
+  },
+
+  partitionCanvases() {
+    const currentSub = this.getCurrentUserSub();
+    const myCanvases = [];
+    const sharedCanvases = [];
+
+    this.state.canvases.forEach((canvas) => {
+      // It's shared if I'm not the owner
+      const isShared = canvas.isShared || (!!currentSub && canvas.ownerSub && canvas.ownerSub !== currentSub);
+      canvas.isShared = isShared;
+      if (isShared) {
+        sharedCanvases.push(canvas);
+      } else {
+        myCanvases.push(canvas);
+      }
+    });
+
+    const sorter = (a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || '');
+    myCanvases.sort(sorter);
+    sharedCanvases.sort(sorter);
+
+    this.state.myCanvases = myCanvases;
+    this.state.sharedCanvases = sharedCanvases;
+  },
+
+  getCurrentUserSub() {
+    const payload = Auth.token ? parseJwt(Auth.token) : null;
+    return payload ? (payload.sub || '') : '';
   },
 
   async selectCanvas(canvasId) {
@@ -685,6 +806,124 @@ const Canvas = {
       this.state.isLoadingNodes = false;
       this.setCanvasLoading(false);
     }
+  },
+
+  openJoinCanvas() {
+    if (this.state.isJoiningCanvas) {
+      this.closeJoinCanvas();
+      return;
+    }
+    if (this.state.isCreatingCanvas) {
+      this.closeCreateCanvas();
+    }
+    this.state.isJoiningCanvas = true;
+    if (this.canvasJoinForm) this.canvasJoinForm.classList.add('is-open');
+    if (this.canvasJoinInput) {
+      this.canvasJoinInput.value = '';
+      this.canvasJoinInput.focus();
+    }
+    if (this.canvasJoinError) this.canvasJoinError.textContent = '';
+  },
+
+  closeJoinCanvas() {
+    this.state.isJoiningCanvas = false;
+    if (this.canvasJoinForm) this.canvasJoinForm.classList.remove('is-open');
+    if (this.canvasJoinError) this.canvasJoinError.textContent = '';
+  },
+
+  async submitJoinCanvas() {
+    const rawCode = this.canvasJoinInput ? this.canvasJoinInput.value.trim() : '';
+    if (!rawCode) {
+      if (this.canvasJoinError) this.canvasJoinError.textContent = 'Enter a code.';
+      return;
+    }
+
+    if (this.canvasJoinSubmit) this.canvasJoinSubmit.disabled = true;
+    if (this.canvasJoinError) this.canvasJoinError.textContent = 'Joining...';
+
+    try {
+      const joined = await Api.joinCanvas(rawCode);
+      const existing = this.state.canvases.find((c) => c.id === joined.canvasId);
+      if (!existing) {
+        const canvas = {
+          id: joined.canvasId,
+          name: joined.name || 'Untitled Canvas',
+          joinedAt: new Date().toISOString(),
+          ownerSub: '', // Unknown owner initially
+          joinCode: '',
+          isShared: true,
+        };
+        this.state.canvases = [canvas, ...this.state.canvases];
+        this.partitionCanvases();
+      }
+      this.closeJoinCanvas();
+      this.renderSidebar();
+      this.selectCanvas(joined.canvasId);
+    } catch (error) {
+      const message = String(error.message || 'Failed to join canvas.');
+      if (this.canvasJoinError) {
+        if (message.toLowerCase().includes('not found')) {
+          this.canvasJoinError.textContent = 'Invalid code.';
+        } else if (message.toLowerCase().includes('already')) {
+          this.canvasJoinError.textContent = 'Already joined.';
+        } else {
+          this.canvasJoinError.textContent = message;
+        }
+      }
+    } finally {
+      if (this.canvasJoinSubmit) this.canvasJoinSubmit.disabled = false;
+    }
+  },
+
+  toggleCodePanel() {
+    if (!this.canvasCodePanel) return;
+    if (this.state.isShowingCode) {
+      this.closeCodePanel();
+    } else {
+      this.openCodePanel();
+    }
+  },
+
+  openCodePanel() {
+    if (!this.canvasCodePanel) return;
+    this.updateCodePanel();
+    this.canvasCodePanel.hidden = false;
+    this.state.isShowingCode = true;
+  },
+
+  closeCodePanel() {
+    if (!this.canvasCodePanel) return;
+    this.canvasCodePanel.hidden = true;
+    this.state.isShowingCode = false;
+  },
+
+  updateCodePanel() {
+    if (!this.canvasCodeToggle || !this.canvasCodeValue || !this.canvasCodeHint) return;
+    const selectedCanvas = this.state.canvases.find(c => c.id === this.state.selectedCanvasId);
+
+    if (!selectedCanvas) {
+      this.canvasCodeToggle.disabled = true;
+      this.canvasCodeValue.textContent = '--';
+      this.canvasCodeHint.textContent = 'Select a canvas to view its code.';
+      return;
+    }
+
+    this.canvasCodeToggle.disabled = false;
+
+    if (selectedCanvas.joinCode) {
+      this.canvasCodeValue.textContent = String(selectedCanvas.joinCode).toUpperCase();
+      this.canvasCodeHint.textContent = 'Share to invite collaborators.';
+      return;
+    }
+
+    if (selectedCanvas.isShared) {
+      this.canvasCodeValue.textContent = '--';
+      this.canvasCodeHint.textContent = 'Codes are only available for your canvases.';
+      return;
+    }
+
+    this.canvasCodeValue.textContent = '--';
+    this.canvasCodeHint.textContent = 'Code unavailable for this canvas.';
   },
 
   openCreateCanvas() {

@@ -361,69 +361,50 @@ html, body {
   padding: var(--space-2) var(--space-1) var(--space-3);
 }
 
-.canvas-create-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-subtle);
-  background: linear-gradient(135deg, #1a1a1a 0%, #242424 100%);
-  color: var(--text-primary);
-  text-align: left;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
-}
+/* ========================================
+   Sidebar Actions (New / Join)
+   ======================================== */
 
-.canvas-create-toggle:hover {
-  border-color: rgba(37, 99, 235, 0.5);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
-}
-
-.canvas-create-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-full);
-  border: 1px solid rgba(37, 99, 235, 0.3);
-  background: var(--accent-light);
-  color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
-.canvas-create-icon svg {
-  width: 16px;
-  height: 16px;
-  stroke: currentColor;
-  fill: none;
-}
-
-.canvas-create-text {
+.canvas-actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
-.canvas-create-title {
+.canvas-action-row {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #1a1a1a 0%, #242424 100%);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  padding: 4px;
+  box-shadow: var(--shadow-sm);
+}
+
+.canvas-action-split {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: var(--space-2);
+  color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: 600;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.canvas-action-split:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.canvas-create-subtitle {
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--text-tertiary);
+.canvas-action-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  margin: 0 4px;
 }
 
-.canvas-create-form {
+.canvas-action-form {
   margin-top: var(--space-2);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
@@ -438,13 +419,13 @@ html, body {
   transition: max-height 200ms ease, opacity 200ms ease, transform 200ms ease;
 }
 
-.canvas-create-form.is-open {
+.canvas-action-form.is-open {
   max-height: 180px;
   opacity: 1;
   transform: translateY(0);
 }
 
-.canvas-create-input {
+.canvas-action-input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -455,19 +436,19 @@ html, body {
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.canvas-create-input:focus {
+.canvas-action-input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
-.canvas-create-actions {
+.canvas-action-actions {
   display: flex;
   gap: var(--space-2);
 }
 
-.canvas-create-submit,
-.canvas-create-cancel {
+.canvas-action-submit,
+.canvas-action-cancel {
   flex: 1;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -477,28 +458,47 @@ html, body {
   transition: all var(--transition-fast);
 }
 
-.canvas-create-submit {
+.canvas-action-submit {
   background: var(--accent);
   color: white;
 }
 
-.canvas-create-submit:hover {
+.canvas-action-submit:hover {
   background: var(--accent-hover);
 }
 
-.canvas-create-cancel {
+.canvas-action-submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.canvas-action-cancel {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
 }
 
-.canvas-create-cancel:hover {
+.canvas-action-cancel:hover {
   background: var(--border-subtle);
 }
 
-.canvas-create-error {
+.canvas-action-error {
   font-size: var(--text-xs);
   color: #c2410c;
   min-height: 14px;
+}
+
+/* Sidebar Sections */
+.sidebar-section-title {
+  padding: var(--space-2) var(--space-4);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.canvas-list-group {
+  margin-bottom: var(--space-2);
 }
 
 /* ========================================
@@ -1365,5 +1365,84 @@ button {
   color: var(--text-secondary);
   font-weight: 600;
   cursor: default;
+}
+
+/* ========================================
+   Canvas Code (Header)
+   ======================================== */
+
+.canvas-code {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.canvas-code-button {
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  transition: all var(--transition-fast);
+}
+
+.canvas-code-button:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.canvas-code-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.canvas-code-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: var(--space-2);
+  width: 240px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-lg);
+  z-index: 20;
+}
+
+.canvas-code-panel[hidden] {
+  display: none;
+}
+
+.canvas-code-title {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.canvas-code-value {
+  font-size: var(--text-lg);
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--bg-tertiary);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  text-align: center;
+  letter-spacing: 2px;
+  user-select: text;
+  margin-bottom: var(--space-2);
+}
+
+.canvas-code-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.4;
 }
 
