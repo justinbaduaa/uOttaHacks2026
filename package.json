@@ -1,5 +1,6 @@
 {
   "name": "glass-box",
+  "productName": "GlassBox",
   "version": "1.0.0",
   "description": "A transparent workspace that lets you explore work the way you explore a log file",
   "main": "main.js",

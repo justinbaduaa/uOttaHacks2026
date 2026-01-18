@@ -3,6 +3,10 @@ const crypto = require("crypto");
 const http = require("http");
 const path = require("path");
 
+if (process.platform === "darwin") {
+  app.name = "GlassBox";
+}
+
 const COGNITO_DOMAIN = "https://glassbox-244271315858-us-east-1.auth.us-east-1.amazoncognito.com";
 const COGNITO_CLIENT_ID = "6260nb86n0snfo7ej0edmc1thj";
 const COGNITO_REDIRECT_URI = "http://localhost:8787/callback";
@@ -28,7 +32,12 @@ function createWindow() {
     // Modern window appearance
     titleBarStyle: "hiddenInset",
     backgroundColor: "#F5F7FA",
+    icon: path.join(__dirname, "frontend", "public", "app icon.png"),
   });
+
+  if (process.platform === "darwin") {
+    app.dock.setIcon(path.join(__dirname, "frontend", "public", "app icon.png"));
+  }
 
   // Load directly from frontend folder
   mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
