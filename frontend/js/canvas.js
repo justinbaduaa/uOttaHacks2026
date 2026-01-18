@@ -9,7 +9,6 @@ const Auth = {
   getStoredToken() {
     return localStorage.getItem('glassbox.authToken');
   },
-
   setStoredToken(token) {
     localStorage.setItem('glassbox.authToken', token);
   },
@@ -72,6 +71,22 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
+  createNode(payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.createNode) {
+      return window.glassBox.api.createNode(token, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  updateNode(nodeId, payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.updateNode) {
+      return window.glassBox.api.updateNode(token, nodeId, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
   listNodes(canvasId) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.listNodes) {
@@ -86,6 +101,14 @@ const Canvas = {
   canvas: null,
   nodes: [],
   selectedNode: null,
+  nodeCreatePopover: null,
+  nodeCreateConfirm: null,
+  nodeCreateError: null,
+  nodeCreateActionLabel: null,
+  pendingNodeParentId: null,
+  isNodeCreateVisible: false,
+  isNodeFieldEditing: false,
+  activeEditableField: null,
   state: {
     canvases: [],
     selectedCanvasId: null,
@@ -97,6 +120,7 @@ const Canvas = {
     isCreatingCanvas: false,
     createCanvasError: null,
     canvasesError: null,
+    isNodeCreateSubmitting: false,
   },
   isDragging: false,
   isPanning: false,
@@ -121,6 +145,10 @@ const Canvas = {
     this.canvasCreateSubmit = document.getElementById('canvasCreateSubmit');
     this.canvasCreateCancel = document.getElementById('canvasCreateCancel');
     this.canvasCreateError = document.getElementById('canvasCreateError');
+    this.nodeCreatePopover = document.getElementById('nodeCreatePopover');
+    this.nodeCreateConfirm = document.getElementById('nodeCreateConfirm');
+    this.nodeCreateError = document.getElementById('nodeCreateError');
+    this.nodeCreateActionLabel = this.nodeCreateConfirm?.querySelector('.node-create-action-label');
 
     this.setupEventListeners();
     this.updateProfile();
@@ -132,9 +160,16 @@ const Canvas = {
   setupEventListeners() {
     // Canvas panning
     this.container.addEventListener('mousedown', (e) => {
+      if (e.detail > 1) {
+        return;
+      }
       if (e.target === this.container || e.target === this.canvas) {
         this.startPan(e);
       }
+    });
+
+    this.container.addEventListener('dblclick', (e) => {
+      this.handleCanvasDoubleClick(e);
     });
 
     document.addEventListener('mousemove', (e) => {
@@ -219,6 +254,165 @@ const Canvas = {
         this.closeCreateCanvas();
       }
     });
+
+    if (this.nodeCreateConfirm) {
+      this.nodeCreateConfirm.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.submitCreateNode();
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!this.isNodeCreateVisible || !this.nodeCreatePopover) return;
+      if (this.state.isNodeCreateSubmitting) return;
+      if (this.nodeCreatePopover.contains(e.target)) {
+        return;
+      }
+      this.hideNodeCreatePopover(true);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isNodeCreateVisible && !this.state.isNodeCreateSubmitting) {
+        this.hideNodeCreatePopover();
+      }
+    });
+  },
+
+  handleCanvasDoubleClick(e) {
+    if (
+      !this.state.selectedCanvasId ||
+      this.state.isLoadingNodes ||
+      this.state.isNodeCreateSubmitting ||
+      this.isNodeFieldEditing
+    ) {
+      return;
+    }
+    if (e.target.closest('.glass-node') || e.target.closest('.node-create-popover')) {
+      return;
+    }
+
+    const rect = this.container.getBoundingClientRect();
+    const margin = 90;
+    const rawX = e.clientX - rect.left;
+    const rawY = e.clientY - rect.top;
+    const maxX = Math.max(margin, rect.width - margin);
+    const maxY = Math.max(margin, rect.height - margin);
+    const x = Math.min(Math.max(rawX, margin), maxX);
+    const y = Math.min(Math.max(rawY, margin), maxY);
+
+    this.pendingNodeParentId = this.currentPath.length > 0
+      ? this.currentPath[this.currentPath.length - 1].id
+      : null;
+
+    this.showNodeCreatePopover(x, y);
+  },
+
+  showNodeCreatePopover(x, y) {
+    if (!this.nodeCreatePopover) return;
+    this.nodeCreatePopover.style.left = `${x}px`;
+    this.nodeCreatePopover.style.top = `${y}px`;
+    this.nodeCreatePopover.classList.add('is-visible');
+    this.nodeCreatePopover.setAttribute('aria-hidden', 'false');
+    this.isNodeCreateVisible = true;
+    if (this.nodeCreateError) {
+      this.nodeCreateError.textContent = '';
+    }
+  },
+
+  hideNodeCreatePopover(force = false) {
+    if (!this.nodeCreatePopover) return;
+    if (!force && this.state.isNodeCreateSubmitting) {
+      return;
+    }
+    this.nodeCreatePopover.classList.remove('is-visible');
+    this.nodeCreatePopover.setAttribute('aria-hidden', 'true');
+    this.isNodeCreateVisible = false;
+    this.pendingNodeParentId = null;
+    if (this.nodeCreateError) {
+      this.nodeCreateError.textContent = '';
+    }
+    if (this.nodeCreateConfirm && (!this.state.isNodeCreateSubmitting || force)) {
+      this.nodeCreateConfirm.disabled = false;
+    }
+    if (this.nodeCreateActionLabel && (!this.state.isNodeCreateSubmitting || force)) {
+      this.nodeCreateActionLabel.textContent = 'Create new task';
+    }
+  },
+
+  async submitCreateNode() {
+    if (!this.nodeCreateConfirm || this.state.isNodeCreateSubmitting) {
+      return;
+    }
+    if (!this.state.selectedCanvasId) {
+      if (this.nodeCreateError) {
+        this.nodeCreateError.textContent = 'Select a canvas first.';
+      }
+      return;
+    }
+
+    const parentNodeId = this.pendingNodeParentId !== null && this.pendingNodeParentId !== undefined
+      ? this.pendingNodeParentId
+      : (this.currentPath.length > 0 ? this.currentPath[this.currentPath.length - 1].id : null);
+
+    const payload = {
+      canvasId: this.state.selectedCanvasId,
+      parentNodeId: parentNodeId || 'ROOT',
+      title: 'enter text here',
+      description: 'enter text here',
+      inputs: [],
+      outputs: [],
+      evidence: { notes: [], files: [] },
+    };
+
+    this.state.isNodeCreateSubmitting = true;
+    this.nodeCreateConfirm.disabled = true;
+    const previousLabel = this.nodeCreateActionLabel
+      ? this.nodeCreateActionLabel.textContent
+      : null;
+    if (this.nodeCreateActionLabel) {
+      this.nodeCreateActionLabel.textContent = 'Creating...';
+    }
+
+    try {
+      const created = await Api.createNode(payload);
+      const normalized = this.normalizeNodeFromApi(created);
+      this.state.nodes = [normalized, ...this.state.nodes];
+      this.buildNodeIndex();
+      this.refreshCurrentView();
+      this.hideNodeCreatePopover();
+      this.focusOnNode(normalized.id);
+    } catch (error) {
+      if (this.nodeCreateError) {
+        this.nodeCreateError.textContent = error.message || 'Failed to create task.';
+      }
+    } finally {
+      this.state.isNodeCreateSubmitting = false;
+      this.nodeCreateConfirm.disabled = false;
+      if (this.nodeCreateActionLabel && previousLabel) {
+        this.nodeCreateActionLabel.textContent = previousLabel;
+      }
+    }
+  },
+
+  refreshCurrentView() {
+    if (this.currentPath.length === 0) {
+      this.renderNodes(this.getRootNodes());
+      return;
+    }
+
+    const currentNodeId = this.currentPath[this.currentPath.length - 1]?.id;
+    const canonicalNode = currentNodeId ? this.getNode(currentNodeId) : null;
+    if (!canonicalNode) {
+      this.renderNodes([]);
+      return;
+    }
+
+    const children = this.getChildNodes(currentNodeId);
+    if (children.length > 0) {
+      this.renderNodes(children);
+    } else {
+      this.renderNodes([canonicalNode]);
+    }
   },
 
   renderSidebar() {
@@ -295,6 +489,7 @@ const Canvas = {
     }
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
+    this.hideNodeCreatePopover();
     this.renderSidebar();
     this.updateBreadcrumb();
     await this.loadNodesForCanvas(canvasId);
@@ -467,21 +662,229 @@ const Canvas = {
       </div>
     `;
 
+    this.attachNodeEditing(element, nodeData);
+
     // Drag listeners
     element.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      if (this.isNodeFieldEditing || e.target.closest('.node-editable')) {
+        return;
+      }
       this.startDrag(e, element, x, y);
     });
 
     // Double-click to navigate into node
-    element.addEventListener('dblclick', () => {
+    element.addEventListener('dblclick', (event) => {
+      if (event.target.closest('.node-editable')) {
+        event.stopPropagation();
+        return;
+      }
+      event.stopPropagation();
       this.navigateIntoNode(nodeData);
     });
 
     return { element, data: nodeData, x, y };
   },
 
+  attachNodeEditing(element, nodeData) {
+    if (!element || !nodeData) return;
+    const titleEl = element.querySelector('.node-title');
+    const descriptionEl = element.querySelector('.node-description');
+
+    const config = [
+      {
+        el: titleEl,
+        field: 'title',
+        placeholder: 'Name this task',
+        allowEmpty: false,
+        value: nodeData.name || '',
+      },
+      {
+        el: descriptionEl,
+        field: 'description',
+        placeholder: 'Describe what success looks like',
+        allowEmpty: true,
+        value: nodeData.goal || '',
+      },
+    ];
+
+    config.forEach(({ el, field, placeholder, allowEmpty, value }) => {
+      if (!el) return;
+      el.contentEditable = 'true';
+      el.spellcheck = true;
+      el.classList.add('node-editable');
+      el.dataset.nodeId = nodeData.id;
+      el.dataset.field = field;
+      el.dataset.allowEmpty = allowEmpty ? 'true' : 'false';
+      el.setAttribute('data-placeholder', placeholder);
+      el.textContent = value;
+      el.dataset.originalValue = this.getNodeFieldTextValue(el);
+      this.updateEditablePlaceholderState(el);
+
+      el.addEventListener('focus', () => this.handleNodeFieldFocus(el));
+      el.addEventListener('input', () => this.handleNodeFieldInput(el));
+      el.addEventListener('keydown', (event) => this.handleNodeFieldKeydown(event, el));
+      el.addEventListener('blur', () => this.handleNodeFieldBlur(el, nodeData));
+    });
+  },
+
+  updateEditablePlaceholderState(element) {
+    if (!element) return;
+    const isEmpty = !element.textContent.trim();
+    element.setAttribute('data-placeholder-visible', isEmpty ? 'true' : 'false');
+  },
+
+  getNodeFieldTextValue(element) {
+    if (!element) return '';
+    return element.textContent.trim();
+  },
+
+  handleNodeFieldFocus(element) {
+    if (!element) return;
+    this.isNodeFieldEditing = true;
+    this.activeEditableField = element;
+    element.classList.remove('has-error');
+    element.classList.remove('is-saving');
+    element.dataset.originalValue = this.getNodeFieldTextValue(element);
+    this.hideNodeCreatePopover(true);
+    element.setAttribute('data-placeholder-visible', 'false');
+    setTimeout(() => this.placeCaretAtEnd(element), 0);
+  },
+
+  handleNodeFieldInput(element) {
+    if (!element) return;
+    if (!element.textContent.trim()) {
+      element.textContent = '';
+    }
+    this.updateEditablePlaceholderState(element);
+  },
+
+  handleNodeFieldKeydown(event, element) {
+    if (!element) return;
+    event.stopPropagation();
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      element.blur();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const original = element.dataset.originalValue || '';
+      element.textContent = original;
+      element.blur();
+    }
+  },
+
+  handleNodeFieldBlur(element, nodeData) {
+    if (!element) return;
+    const originalValue = element.dataset.originalValue || '';
+    const newValue = this.getNodeFieldTextValue(element);
+    this.isNodeFieldEditing = false;
+    this.activeEditableField = null;
+    this.updateEditablePlaceholderState(element);
+
+    if (newValue === originalValue) {
+      element.textContent = originalValue;
+      this.updateEditablePlaceholderState(element);
+      return;
+    }
+
+    const allowEmpty = element.dataset.allowEmpty === 'true';
+    if (!allowEmpty && !newValue) {
+      element.textContent = originalValue;
+      element.classList.add('has-error');
+      setTimeout(() => element.classList.remove('has-error'), 1200);
+      this.updateEditablePlaceholderState(element);
+      return;
+    }
+
+    const updates = {};
+    const apiUpdates = {};
+    if (element.dataset.field === 'title') {
+      updates.name = newValue;
+      apiUpdates.title = newValue;
+    } else {
+      updates.goal = newValue;
+      apiUpdates.description = newValue;
+    }
+
+    this.saveNodeField(nodeData, updates, apiUpdates, element, originalValue);
+  },
+
+  async saveNodeField(nodeData, updates, apiUpdates, element, fallbackValue) {
+    if (!nodeData || !nodeData.id || !this.state.selectedCanvasId) {
+      return;
+    }
+    element.classList.add('is-saving');
+    element.classList.remove('has-error');
+
+    try {
+      const updated = await Api.updateNode(nodeData.id, {
+        canvasId: this.state.selectedCanvasId,
+        ...apiUpdates,
+      });
+
+      const resolvedUpdates = { ...updates };
+      if (updates.name !== undefined && updated && Object.prototype.hasOwnProperty.call(updated, 'title')) {
+        resolvedUpdates.name = updated.title || '';
+      }
+      if (updates.goal !== undefined && updated && Object.prototype.hasOwnProperty.call(updated, 'description')) {
+        resolvedUpdates.goal = updated.description || '';
+      }
+
+      const finalValue = resolvedUpdates.name ?? resolvedUpdates.goal ?? '';
+      element.dataset.originalValue = finalValue;
+      element.textContent = finalValue;
+      element.classList.remove('is-saving');
+      element.classList.remove('has-error');
+      this.updateEditablePlaceholderState(element);
+      this.applyNodeUpdates(nodeData.id, {
+        ...resolvedUpdates,
+        updatedAt: updated?.updatedAt || nodeData.updatedAt,
+      }, nodeData);
+    } catch (error) {
+      console.error('[Canvas] Failed to update node', error);
+      element.classList.remove('is-saving');
+      element.classList.add('has-error');
+      element.textContent = fallbackValue;
+      element.dataset.originalValue = fallbackValue;
+      setTimeout(() => element.classList.remove('has-error'), 1200);
+      this.updateEditablePlaceholderState(element);
+    }
+  },
+
+  applyNodeUpdates(nodeId, updates, nodeData) {
+    if (nodeData && nodeData.id === nodeId) {
+      Object.assign(nodeData, updates);
+    }
+    if (this.state.nodesById[nodeId]) {
+      Object.assign(this.state.nodesById[nodeId], updates);
+    }
+    this.nodes.forEach((nodeEntry) => {
+      if (nodeEntry.data.id === nodeId) {
+        Object.assign(nodeEntry.data, updates);
+      }
+    });
+    this.currentPath = this.currentPath.map((node) => {
+      if (node.id === nodeId) {
+        return { ...node, ...updates };
+      }
+      return node;
+    });
+  },
+
+  placeCaretAtEnd(element) {
+    if (!element) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    const selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  },
+
   startDrag(e, element, currentX, currentY) {
+    this.hideNodeCreatePopover();
     this.isDragging = true;
     this.selectedNode = this.nodes.find(n => n.element === element);
     
@@ -515,6 +918,7 @@ const Canvas = {
   },
 
   startPan(e) {
+    this.hideNodeCreatePopover();
     this.isPanning = true;
     this.panStart = {
       x: e.clientX - this.canvasOffset.x,
@@ -575,6 +979,7 @@ const Canvas = {
   },
 
   navigateIntoNode(nodeData) {
+    this.hideNodeCreatePopover();
     const children = this.getChildNodes(nodeData.id);
     
     this.currentPath.push(nodeData);
@@ -593,6 +998,7 @@ const Canvas = {
   },
 
   navigateToRoot() {
+    this.hideNodeCreatePopover();
     this.currentPath = [];
     this.renderNodes(this.getRootNodes());
     this.canvasOffset = { x: 0, y: 0 };
@@ -637,6 +1043,10 @@ const Canvas = {
       }
       this.state.childrenByParent[parentId].push(node);
     });
+
+    this.currentPath = this.currentPath
+      .map((node) => this.state.nodesById[node.id] || node)
+      .filter(Boolean);
   },
 
   getNode(nodeId) {

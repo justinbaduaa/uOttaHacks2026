@@ -65,8 +65,15 @@
           </div>
           <div class="canvas-create" id="canvasCreate">
             <button class="canvas-create-toggle" id="canvasCreateToggle">
-              <span class="canvas-create-icon">+</span>
-              <span>New canvas</span>
+              <span class="canvas-create-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" role="presentation">
+                  <path d="M8 3v10M3 8h10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <div class="canvas-create-text">
+                <span class="canvas-create-title">New canvas</span>
+                <span class="canvas-create-subtitle">Start a blank workspace</span>
+              </div>
             </button>
             <div class="canvas-create-form" id="canvasCreateForm">
               <input
@@ -107,6 +114,12 @@
           <div class="canvas-loading" id="canvasLoading" hidden>
             <div class="spinner"></div>
             <span>Loading nodes...</span>
+          </div>
+          <div class="node-create-popover" id="nodeCreatePopover" aria-hidden="true">
+            <button class="node-create-action" id="nodeCreateConfirm" type="button">
+              <span class="node-create-action-label">Create new task</span>
+            </button>
+            <div class="node-create-error" id="nodeCreateError"></div>
           </div>
         </div>
       </main>
