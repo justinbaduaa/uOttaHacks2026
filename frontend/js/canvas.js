@@ -110,6 +110,37 @@ const Api = {
     }
     return Promise.reject(new Error('API bridge unavailable'));
   },
+
+  presignFile(payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.presignFile) {
+      return window.glassBox.api.presignFile(token, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  completeFile(payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.completeFile) {
+      return window.glassBox.api.completeFile(token, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  downloadFile(payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.downloadFile) {
+      return window.glassBox.api.downloadFile(token, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  uploadToS3(url, contentType, data) {
+    if (window.glassBox?.api?.uploadToS3) {
+      return window.glassBox.api.uploadToS3(url, contentType, data);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
 };
 
 const Canvas = {
@@ -1124,11 +1155,12 @@ const Canvas = {
 
     const iconName = nodeData.icon || 'box';
     const inputs = nodeData.inputs || [];
+    const evidenceFiles = (nodeData.evidence || []).filter(item => item.type === 'file');
     // If no inputs (new node), showing some mocks provided by user request or keep empty
     // The user request said "drop in it... add a number of resources... dropdown to view"
     // So we start empty or with existing data.
 
-    const fileCount = inputs.length + (nodeData.evidence?.length || 0); 
+    const fileCount = inputs.length + evidenceFiles.length;
     const layerCount = this.getChildNodes(nodeData.id)?.length || 0;
 
     element.innerHTML = `
@@ -1160,15 +1192,15 @@ const Canvas = {
           <div class="input-list-container" style="display: none;">
              <div class="input-list">
                 ${inputs.map(input => `
-                  <div class="input-item">
+                  <div class="input-item" data-file-id="${this.escapeHtml(input.fileId || '')}" data-s3-key="${this.escapeHtml(input.s3Key || '')}">
                     <span class="input-item-icon"><i data-lucide="${this.escapeHtml(input.icon || 'file')}"></i></span>
-                    <span class="input-item-text">${this.escapeHtml(input.name)}</span>
+                    <span class="input-item-text">${this.escapeHtml(input.filename || input.name || 'File')}</span>
                   </div>
                 `).join('')}
-                ${(nodeData.evidence || []).map(file => `
-                  <div class="input-item">
+                ${evidenceFiles.map(file => `
+                  <div class="input-item" data-file-id="${this.escapeHtml(file.fileId || '')}" data-s3-key="${this.escapeHtml(file.s3Key || '')}">
                      <span class="input-item-icon"><i data-lucide="file"></i></span>
-                     <span class="input-item-text">${this.escapeHtml(typeof file === 'string' ? file : 'File')}</span>
+                     <span class="input-item-text">${this.escapeHtml(file.name || file.filename || 'File')}</span>
                   </div>
                 `).join('')}
              </div>
@@ -1282,6 +1314,16 @@ const Canvas = {
           inputListContainer.style.display = isHidden ? 'block' : 'none';
           inputToggle.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
        });
+    }
+
+    if (inputListContainer) {
+      inputListContainer.addEventListener('click', (e) => {
+        const item = e.target.closest('.input-item[data-file-id], .input-item[data-s3-key]');
+        if (!item) return;
+        const fileId = item.dataset.fileId || '';
+        const s3Key = item.dataset.s3Key || '';
+        this.downloadNodeFile(nodeData, { fileId, s3Key });
+      });
     }
 
 
@@ -1699,7 +1741,7 @@ const Canvas = {
     setTimeout(() => node.element.classList.remove('focused'), 2000);
   },
 
-  handleNodeDrop(e, nodeData, listContainer, toggleBtn, titleEl, countEl) {
+  async handleNodeDrop(e, nodeData, listContainer, toggleBtn, titleEl, countEl) {
     let files = [];
     if (e.dataTransfer.items) {
       files = [...e.dataTransfer.items].filter(item => item.kind === 'file').map(item => item.getAsFile());
@@ -1708,40 +1750,91 @@ const Canvas = {
     }
 
     if (files.length === 0) return;
+    if (!this.state.selectedCanvasId || !nodeData?.id) {
+      this.showCanvasToast('Select a canvas before uploading.', 'error');
+      return;
+    }
 
-    if (!nodeData.inputs) nodeData.inputs = [];
-    
-    files.forEach(file => {
-      const input = {
-        name: file.name,
-        icon: 'file', // Default icon
-        type: file.type
-      };
-      nodeData.inputs.push(input);
-      
-      // Render Item
-      const itemEl = document.createElement('div');
-      itemEl.className = 'input-item';
-      itemEl.innerHTML = `
-         <span class="input-item-icon"><i data-lucide="file"></i></span>
-         <span class="input-item-text">${this.escapeHtml(file.name)}</span>
-      `;
-      if (window.lucide) window.lucide.createIcons(); // might be needed per item or batch
-      listContainer.appendChild(itemEl);
-    });
+    if (toggleBtn) toggleBtn.disabled = true;
+    if (titleEl) titleEl.textContent = 'Input (uploading...)';
 
-    // Refresh Icons for the new items
-    if (window.lucide) window.lucide.createIcons();
+    const canvasId = this.state.selectedCanvasId;
+    const nodeId = nodeData.id;
 
-    // Update Counts
-    const total = nodeData.inputs.length + (nodeData.evidence?.length || 0);
+    for (const file of files) {
+      try {
+        const contentType = file.type || 'application/octet-stream';
+        const presigned = await Api.presignFile({
+          canvasId,
+          nodeId,
+          slot: 'inputs',
+          filename: file.name,
+          contentType,
+        });
+
+        const buffer = await file.arrayBuffer();
+        await Api.uploadToS3(presigned.uploadUrl, contentType, buffer);
+
+        const updated = await Api.completeFile({
+          canvasId,
+          nodeId,
+          slot: 'inputs',
+          fileId: presigned.fileId,
+          s3Key: presigned.s3Key,
+          filename: file.name,
+          contentType,
+        });
+
+        const normalized = this.normalizeNodeFromApi(updated);
+        this.applyNodeUpdates(nodeId, normalized, nodeData);
+      } catch (error) {
+        console.error('[Canvas] File upload failed', error);
+        this.showCanvasToast(error.message || 'Failed to upload file.', 'error');
+      }
+    }
+
+    this.buildNodeIndex();
+    this.refreshCurrentView();
+
+    const updatedNode = this.getNode(nodeId);
+    const evidenceFiles = (updatedNode?.evidence || []).filter(item => item.type === 'file');
+    const total = (updatedNode?.inputs || []).length + evidenceFiles.length;
     if (titleEl) titleEl.textContent = `Input (${total})`;
     if (countEl) countEl.textContent = total;
     if (toggleBtn) toggleBtn.disabled = false;
-    
-    // Auto-show list
-    listContainer.parentElement.style.display = 'block'; // Ensure container is shown
+
+    if (listContainer && listContainer.parentElement) {
+      listContainer.parentElement.style.display = 'block';
+    }
     if (toggleBtn) toggleBtn.style.transform = 'rotate(180deg)';
+  },
+
+  async downloadNodeFile(nodeData, fileMeta) {
+    if (!this.state.selectedCanvasId || !nodeData?.id) {
+      return;
+    }
+    try {
+      const payload = await Api.downloadFile({
+        canvasId: this.state.selectedCanvasId,
+        nodeId: nodeData.id,
+        fileId: fileMeta?.fileId || undefined,
+        s3Key: fileMeta?.s3Key || undefined,
+      });
+      const url = payload?.downloadUrl;
+      if (!url) {
+        throw new Error('Missing download URL');
+      }
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (error) {
+      console.error('[Canvas] File download failed', error);
+      this.showCanvasToast(error.message || 'Failed to download file.', 'error');
+    }
   },
 
   setupGlobalIconPopover() {
@@ -1919,6 +2012,8 @@ const Canvas = {
       author,
       children: [],
       parent: node.parentNodeId === 'ROOT' ? null : node.parentNodeId,
+      inputs: Array.isArray(node.inputs) ? node.inputs : [],
+      outputs: Array.isArray(node.outputs) ? node.outputs : [],
       createdAt: node.createdAt || '',
       updatedAt: node.updatedAt || '',
     };
@@ -1973,6 +2068,10 @@ const Canvas = {
           name: file.filename || file.s3Key || file.fileId || 'File',
           size: file.contentType || '',
           timestamp,
+          s3Key: file.s3Key,
+          fileId: file.fileId,
+          filename: file.filename,
+          contentType: file.contentType,
         });
       });
     }
@@ -2202,6 +2301,10 @@ const Canvas = {
       const existing = this.state.nodesById[incoming.id];
       if (existing) {
         // Update existing node
+        const existingEvidenceCount = Array.isArray(existing.evidence) ? existing.evidence.length : 0;
+        const incomingEvidenceCount = Array.isArray(incoming.evidence) ? incoming.evidence.length : 0;
+        const existingInputsCount = Array.isArray(existing.inputs) ? existing.inputs.length : 0;
+        const incomingInputsCount = Array.isArray(incoming.inputs) ? incoming.inputs.length : 0;
         Object.assign(existing, incoming);
         const rendered = renderedById.get(incoming.id);
         if (rendered) {
@@ -2218,6 +2321,9 @@ const Canvas = {
             rendered.y = incoming.y;
             rendered.element.style.transform = `translate(${incoming.x}px, ${incoming.y}px)`;
           }
+        }
+        if (existingEvidenceCount !== incomingEvidenceCount || existingInputsCount !== incomingInputsCount) {
+          needsRefresh = true;
         }
       } else {
         // New node

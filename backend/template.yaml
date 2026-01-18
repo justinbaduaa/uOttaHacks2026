@@ -121,6 +121,19 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub glassbox-files-${AWS::AccountId}-${AWS::Region}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT
+              - HEAD
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -298,6 +311,8 @@ Resources:
             Path: /files/presign
       Policies:
         - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
             TableName: !Ref CanvasTable
         - S3WritePolicy:
             BucketName: !Ref FilesBucket
@@ -320,6 +335,27 @@ Resources:
             TableName: !Ref NodesTable
         - DynamoDBReadPolicy:
             TableName: !Ref CanvasTable
+
+  DownloadFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxDownloadFile
+      CodeUri: src/
+      Handler: handlers.files.download_file
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /files/download
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+        - S3ReadPolicy:
+            BucketName: !Ref FilesBucket
 
 Outputs:
   ApiUrl:

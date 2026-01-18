@@ -331,3 +331,56 @@ ipcMain.handle("api-join-canvas", async (event, { token, joinCode }) => {
   }
   return apiRequest({ path: "/canvases/join", method: "POST", token, body: { joinCode } });
 });
+
+ipcMain.handle("api-presign-file", async (event, { token, payload }) => {
+  const body = {
+    canvasId: payload?.canvasId,
+    nodeId: payload?.nodeId,
+    slot: payload?.slot,
+    filename: payload?.filename,
+    contentType: payload?.contentType,
+  };
+  return apiRequest({ path: "/files/presign", method: "POST", token, body });
+});
+
+ipcMain.handle("api-complete-file", async (event, { token, payload }) => {
+  const body = {
+    canvasId: payload?.canvasId,
+    nodeId: payload?.nodeId,
+    slot: payload?.slot,
+    fileId: payload?.fileId,
+    s3Key: payload?.s3Key,
+    filename: payload?.filename,
+    contentType: payload?.contentType,
+  };
+  return apiRequest({ path: "/files/complete", method: "POST", token, body });
+});
+
+ipcMain.handle("api-download-file", async (event, { token, payload }) => {
+  const body = {
+    canvasId: payload?.canvasId,
+    nodeId: payload?.nodeId,
+    fileId: payload?.fileId,
+    s3Key: payload?.s3Key,
+  };
+  return apiRequest({ path: "/files/download", method: "POST", token, body });
+});
+
+ipcMain.handle("api-upload-s3", async (event, { url, contentType, data }) => {
+  if (!url) {
+    throw new Error("Missing upload URL");
+  }
+  const body = Buffer.from(data || []);
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType || "application/octet-stream",
+    },
+    body,
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`S3 upload failed (${response.status}) ${text}`.trim());
+  }
+  return { ok: true };
+});

@@ -11,5 +11,9 @@ contextBridge.exposeInMainWorld('glassBox', {
     updateNode: (token, nodeId, payload) => ipcRenderer.invoke('api-update-node', { token, nodeId, payload }),
     deleteNode: (token, nodeId, canvasId) => ipcRenderer.invoke('api-delete-node', { token, nodeId, canvasId }),
     joinCanvas: (token, joinCode) => ipcRenderer.invoke('api-join-canvas', { token, joinCode }),
+    presignFile: (token, payload) => ipcRenderer.invoke('api-presign-file', { token, payload }),
+    completeFile: (token, payload) => ipcRenderer.invoke('api-complete-file', { token, payload }),
+    downloadFile: (token, payload) => ipcRenderer.invoke('api-download-file', { token, payload }),
+    uploadToS3: (url, contentType, data) => ipcRenderer.invoke('api-upload-s3', { url, contentType, data }),
   },
 });
