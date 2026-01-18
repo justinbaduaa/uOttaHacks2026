@@ -17,30 +17,30 @@
   --bg-secondary: #1a1a1a;
   --bg-tertiary: #242424;
   --bg-canvas: #0d0d0d;
-  
+
   /* Sidebar Colors */
   --sidebar-bg: #0d0d0d;
   --sidebar-hover: #1f1f1f;
   --sidebar-active: rgba(37, 99, 235, 0.15);
   --sidebar-active-text: #60a5fa;
-  
+
   /* Border Colors */
   --border-subtle: #2a2a2a;
   --border-default: #3a3a3a;
   --border-strong: #4a4a4a;
-  
+
   /* Text Colors */
   --text-primary: #ffffff;
   --text-secondary: #a1a1aa;
   --text-tertiary: #71717a;
   --text-muted: #52525b;
-  
+
   /* Accent Colors - Blue for enterprise branding */
   --accent: #2563eb;
   --accent-light: rgba(37, 99, 235, 0.15);
   --accent-hover: #1d4ed8;
   --accent-muted: #3b82f6;
-  
+
   /* Status Colors */
   --status-done: #22c55e;
   --status-done-bg: rgba(34, 197, 94, 0.15);
@@ -48,16 +48,16 @@
   --status-progress-bg: rgba(245, 158, 11, 0.15);
   --status-planning: #71717a;
   --status-planning-bg: rgba(113, 113, 122, 0.15);
-  
+
   /* Typography */
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  
+
   /* Font Sizes */
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;
   --text-lg: 1.125rem;
-  
+
   /* Spacing */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -66,20 +66,20 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
-  
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 9999px;
-  
+
   /* Shadows - Enhanced for dark theme */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-base: 200ms ease;
@@ -89,7 +89,8 @@
    Base Styles
    ======================================== */
 
-html, body {
+html,
+body {
   width: 100%;
   height: 100%;
   font-family: var(--font-sans);
@@ -124,7 +125,8 @@ html, body {
 
 .sidebar-header {
   padding: var(--space-4);
-  padding-top: 48px; /* Space for macOS native traffic lights */
+  padding-top: 48px;
+  /* Space for macOS native traffic lights */
   -webkit-app-region: drag;
 }
 
@@ -191,13 +193,11 @@ html, body {
 /* Separator */
 .sidebar-separator {
   height: 1px;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent,
-    transparent 2px,
-    var(--border-subtle) 2px,
-    var(--border-subtle) 6px
-  );
+  background: repeating-linear-gradient(90deg,
+      transparent,
+      transparent 2px,
+      var(--border-subtle) 2px,
+      var(--border-subtle) 6px);
   margin: var(--space-3) var(--space-4);
 }
 
@@ -487,6 +487,10 @@ html, body {
   min-height: 14px;
 }
 
+.text-success {
+  color: var(--status-done) !important;
+}
+
 /* Sidebar Sections */
 .sidebar-section-title {
   padding: var(--space-2) var(--space-4);
@@ -599,7 +603,7 @@ html, body {
   position: relative;
   overflow: hidden;
   cursor: grab;
-  background: 
+  background:
     radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 50%),
     var(--bg-canvas);
 }
@@ -892,6 +896,7 @@ html, body {
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.3;
+  user-select: none;
 }
 
 
@@ -963,7 +968,8 @@ html, body {
   color: var(--text-primary);
 }
 
-.node-footer-toggle i { /* Lucide icon */
+.node-footer-toggle i {
+  /* Lucide icon */
   width: 16px;
   height: 16px;
   transition: transform var(--transition-fast);
@@ -974,8 +980,8 @@ html, body {
 }
 
 .glass-node.expanded .node-footer-toggle {
-    border-bottom: 1px solid var(--border-subtle);
-    border-radius: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
 }
 
 /* Node Input Section */
@@ -1459,7 +1465,8 @@ button {
 }
 
 .node-title {
-  flex: 1; /* Ensure title takes up space */
+  flex: 1;
+  /* Ensure title takes up space */
 }
 
 .node-icon-trigger,
@@ -1483,7 +1490,8 @@ button {
 }
 
 .node-nav-entry {
-  margin-left: auto; /* Push to right */
+  margin-left: auto;
+  /* Push to right */
 }
 
 /* Drop Zone */
@@ -1501,7 +1509,8 @@ button {
   font-size: var(--text-xs);
   background: rgba(255, 255, 255, 0.02);
   transition: all var(--transition-fast);
-  cursor: pointer; /* Suggests interactivity */
+  cursor: pointer;
+  /* Suggests interactivity */
 }
 
 .drop-zone:hover,
@@ -1602,6 +1611,13 @@ button {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
