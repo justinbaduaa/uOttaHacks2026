@@ -8,7 +8,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Complete a file upload and attach it to a node.")
     parser.add_argument("--canvas-id", default=os.getenv("CANVAS_ID", ""), help="Canvas ID (UUID)")
     parser.add_argument("--node-id", default=os.getenv("NODE_ID", ""), help="Node ID (UUID)")
-    parser.add_argument("--slot", default=os.getenv("FILE_SLOT", ""), help="inputs or outputs")
+    parser.add_argument("--slot", default=os.getenv("FILE_SLOT", ""), help="inputs, outputs, or evidence")
     parser.add_argument("--file-id", default=os.getenv("FILE_ID", ""), help="File ID")
     parser.add_argument("--s3-key", default=os.getenv("S3_KEY", ""), help="S3 key")
     parser.add_argument("--filename", default=os.getenv("FILENAME", ""), help="Filename")

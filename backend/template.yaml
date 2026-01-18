@@ -59,11 +59,20 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
+        - AttributeName: joinCode
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: JoinCodeIndex
+          KeySchema:
+            - AttributeName: joinCode
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   NodesTable:
     Type: AWS::DynamoDB::Table
@@ -191,6 +200,25 @@ Resources:
             ApiId: !Ref ApiGateway
             Method: get
             Path: /nodes
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  GetNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxGetNode
+      CodeUri: src/
+      Handler: handlers.nodes.get_node_by_id
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: get
+            Path: /nodes/{nodeId}
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref NodesTable

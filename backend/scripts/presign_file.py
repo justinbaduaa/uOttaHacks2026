@@ -8,7 +8,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Request a presigned file upload URL.")
     parser.add_argument("--canvas-id", default=os.getenv("CANVAS_ID", ""), help="Canvas ID (UUID)")
     parser.add_argument("--node-id", default=os.getenv("NODE_ID", ""), help="Node ID (UUID)")
-    parser.add_argument("--slot", default=os.getenv("FILE_SLOT", ""), help="inputs or outputs")
+    parser.add_argument("--slot", default=os.getenv("FILE_SLOT", ""), help="inputs, outputs, or evidence")
     parser.add_argument("--filename", default=os.getenv("FILENAME", ""), help="Filename")
     parser.add_argument("--content-type", default=os.getenv("CONTENT_TYPE", ""), help="Content type")
     parser.add_argument("--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")

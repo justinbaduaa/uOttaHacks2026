@@ -242,7 +242,7 @@ def complete_file(event, context):
         updated_item = response["Attributes"]
         evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
         if evidence_error:
-            evidence = {"notes": [], "files": []}
+            evidence = []
 
         logger.info(
             f"Completed file upload for node {node_id} in canvas {canvas_id}: "
@@ -259,6 +259,9 @@ def complete_file(event, context):
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
             "evidence": evidence,
+            "status": updated_item.get("status") or "draft",
+            "approvalMode": updated_item.get("approvalMode"),
+            "assignedTo": updated_item.get("assignedTo"),
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],

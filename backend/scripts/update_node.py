@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument("--description", default=os.getenv("NODE_DESCRIPTION", ""), help="Node description")
     parser.add_argument("--inputs-json", default=os.getenv("NODE_INPUTS_JSON", ""), help="JSON array for inputs")
     parser.add_argument("--outputs-json", default=os.getenv("NODE_OUTPUTS_JSON", ""), help="JSON array for outputs")
-    parser.add_argument("--evidence-json", default=os.getenv("NODE_EVIDENCE_JSON", ""), help="JSON object for evidence")
+    parser.add_argument("--evidence-json", default=os.getenv("NODE_EVIDENCE_JSON", ""), help="JSON array for evidence")
     parser.add_argument("--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")
     parser.add_argument("--auth-token", default=os.getenv("AUTH_TOKEN", ""), help="Bearer token or raw token")
     args = parser.parse_args()

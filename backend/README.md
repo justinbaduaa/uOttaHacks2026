@@ -86,6 +86,7 @@ Authorization: Bearer <jwt-token>
 #### Node Management
 
 - `GET /nodes?canvasId={id}&parentNodeId={id}&updatedSince={iso8601}` - List nodes
+- `GET /nodes/{nodeId}?canvasId={id}` - Get a single node
 - `POST /nodes` - Create a new node
 - `PATCH /nodes/{nodeId}` - Update a node
 - `DELETE /nodes/{nodeId}?canvasId={id}` - Delete node and descendants
@@ -132,16 +133,24 @@ Authorization: Bearer <jwt-token>
 - `parentNodeId` ("ROOT" or UUID)
 - `title` (string)
 - `description` (string)
-- `inputs` (array of file items)
-- `outputs` (array of file items)
-- `evidence` (object with `notes` array of strings and `files` array of file items)
+- `inputs` (array of item objects)
+- `outputs` (array of item objects)
+- `evidence` (array of item objects)
+- `status` ("draft" | "ready" | "in_progress" | "blocked" | "completed" | "failed")
+- `approvalMode` ("auto" | "approve_nodes" | "approve_all")
+- `assignedTo` (object with `type` and `id`)
 - `authorSub` (Cognito user ID)
 - `createdAt` (ISO8601)
 - `updatedAt` (ISO8601)
 
-### File Item
-- `type` - "text" | "link" | "file"
+Note: When `status` is set to `completed` and `assignedTo.type` is `agent`, evidence must be non-empty.
+
+### Item Object
+- `type` - "text" | "link" | "file" | "node"
+- For type="text": `text`
+- For type="link": `url`
 - For type="file": `fileId`, `s3Key`, `filename`, `contentType`
+- For type="node": `nodeId`, optional `include` ("outputs" | "evidence" | "all")
 
 ## Local Development
 
