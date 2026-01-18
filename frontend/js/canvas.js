@@ -267,8 +267,10 @@ const Canvas = {
   },
 
   async poll() {
-    // Strict check removed to allow non-destructive updates
-    // if (this.isNodeFieldEditing) { return; }
+    // Strict check: if editing, do absolutely nothing.
+    if (this.isNodeFieldEditing) {
+      return;
+    }
 
     const canvasId = this.state.selectedCanvasId;
     if (!canvasId || this.state.isLoadingNodes || this.pollInFlight) {
@@ -1134,159 +1136,20 @@ const Canvas = {
   },
 
   renderNodes(nodeDataArray) {
-    if (this.state.isLoadingNodes) return;
+    this.nodes = [];
+    this.canvas.innerHTML = '';
 
-    // Index existing nodes by ID
-    const existingMap = new Map();
-    this.nodes.forEach(wrapper => {
-      // wrapper is { element, data, x, y }
-      existingMap.set(wrapper.data.id, wrapper);
-    });
-
-    const newNodes = [];
-    const presentIds = new Set();
+    if (nodeDataArray.length === 0 && !this.state.isLoadingNodes) {
+      return;
+    }
 
     nodeDataArray.forEach((nodeData, index) => {
-      presentIds.add(nodeData.id);
-
-      if (existingMap.has(nodeData.id)) {
-        // Update existing
-        const wrapper = existingMap.get(nodeData.id);
-        this.updateNodeElement(wrapper, nodeData, index);
-        // Update data reference
-        wrapper.data = nodeData;
-        newNodes.push(wrapper);
-      } else {
-        // Create new
-        const wrapper = this.createNodeElement(nodeData, index);
-        this.canvas.appendChild(wrapper.element);
-        newNodes.push(wrapper);
-      }
+      const node = this.createNodeElement(nodeData, index);
+      this.nodes.push(node);
+      this.canvas.appendChild(node.element);
     });
-
-    // Remove deleted nodes
-    this.nodes.forEach(wrapper => {
-      if (!presentIds.has(wrapper.data.id)) {
-        if (wrapper.element.parentNode) {
-          wrapper.element.parentNode.removeChild(wrapper.element);
-        }
-      }
-    });
-
-    this.nodes = newNodes;
-
-    // Re-render icons for new/updated content
+    // Re-render icons for new nodes
     if (window.lucide) window.lucide.createIcons();
-  },
-
-  updateNodeElement(nodeWrapper, newNodeData, index) {
-      const element = nodeWrapper.element;
-      
-      // Update Position (unless dragging THIS node)
-      const isBeingDragged = (this.isDragging && this.selectedNode && this.selectedNode.data.id === newNodeData.id);
-      if (!isBeingDragged) {
-           const hasStored = Number.isFinite(newNodeData.x) && Number.isFinite(newNodeData.y);
-           // Calculate default if not stored (same logic as createNodeElement)
-           const col = index % 3;
-           const row = Math.floor(index / 3);
-           const x = hasStored ? newNodeData.x : 80 + col * 360;
-           const y = hasStored ? newNodeData.y : 80 + row * 260;
-           
-           if (nodeWrapper.x !== x || nodeWrapper.y !== y) {
-               nodeWrapper.x = x;
-               nodeWrapper.y = y;
-               element.style.transform = `translate(${x}px, ${y}px)`;
-           }
-      }
-
-      // Update Title (Preserve focus)
-      const titleEl = element.querySelector('.node-title');
-      if (titleEl && document.activeElement !== titleEl && this.activeEditableField !== titleEl) {
-          const newName = newNodeData.name || 'Untitled';
-          if (titleEl.textContent !== newName) {
-              titleEl.textContent = newName;
-              titleEl.dataset.originalValue = newName;
-          }
-      }
-
-      // Update Description (Preserve focus)
-      const descEl = element.querySelector('.node-description');
-      if (descEl && document.activeElement !== descEl && this.activeEditableField !== descEl) {
-          const newDesc = newNodeData.goal || 'Description';
-          if (descEl.textContent !== newDesc) {
-              descEl.textContent = newDesc;
-              descEl.dataset.originalValue = newDesc;
-              this.updateEditablePlaceholderState(descEl);
-          }
-      }
-      
-      // Update Input Counts & Lists
-      const newInputs = newNodeData.inputs || [];
-      const newEvidence = (newNodeData.evidence || []).filter(item => item.type === 'file');
-      const fileCount = newInputs.length + newEvidence.length;
-      
-      const fileCountText = element.querySelector('.file-count-text');
-      if (fileCountText) fileCountText.textContent = fileCount;
-      
-      const inputTitle = element.querySelector('.input-title');
-      if (inputTitle) inputTitle.textContent = `Input (${fileCount})`;
-      
-      const inputList = element.querySelector('.input-list');
-      if (inputList) {
-          const newHtml = `
-            ${newInputs.map(input => `
-                <div class="input-item" data-file-id="${this.escapeHtml(input.fileId || '')}" data-s3-key="${this.escapeHtml(input.s3Key || '')}">
-                    <span class="input-item-icon"><i data-lucide="${this.escapeHtml(input.icon || 'file')}"></i></span>
-                    <span class="input-item-text">${this.escapeHtml(input.filename || input.name || 'File')}</span>
-                </div>
-            `).join('')}
-            ${newEvidence.map(file => `
-                <div class="input-item" data-file-id="${this.escapeHtml(file.fileId || '')}" data-s3-key="${this.escapeHtml(file.s3Key || '')}">
-                    <span class="input-item-icon"><i data-lucide="file"></i></span>
-                    <span class="input-item-text">${this.escapeHtml(file.name || file.filename || 'File')}</span>
-                </div>
-            `).join('')}
-          `;
-          // Simple string comparison to avoid completely replacing if identical
-          // stripping whitespace for rough equality check
-          if (inputList.innerHTML.replace(/\s/g,'') !== newHtml.replace(/\s/g,'')) {
-               inputList.innerHTML = newHtml;
-          }
-      }
-      
-      // Update Outputs
-      const newOutputs = newNodeData.outputs || [];
-      const outputCount = newOutputs.length;
-      const outputTitle = element.querySelector('.output-title');
-      if (outputTitle) outputTitle.textContent = `Output (${outputCount})`;
-      
-      const outputList = element.querySelector('.output-list');
-      if (outputList) {
-          const newHtml = newOutputs.map(output => `
-                <div class="input-item" data-file-id="${this.escapeHtml(output.fileId || '')}" data-s3-key="${this.escapeHtml(output.s3Key || '')}">
-                   <span class="input-item-icon"><i data-lucide="file"></i></span>
-                   <span class="input-item-text">${this.escapeHtml(output.filename || output.name || 'File')}</span>
-                </div>
-            `).join('');
-          if (outputList.innerHTML.replace(/\s/g,'') !== newHtml.replace(/\s/g,'')) {
-             outputList.innerHTML = newHtml;
-          }
-      }
-      
-      // Update Layer Stats
-      const layerCount = this.getChildNodes(newNodeData.id)?.length || 0;
-      const layerStats = element.querySelector('.stat-item.layers span:nth-child(2)');
-      if (layerStats) layerStats.textContent = layerCount;
-      
-      // Update Icon
-      const iconName = newNodeData.icon || 'box';
-      const currentIcon = nodeWrapper.data.icon || 'box';
-      if (currentIcon !== iconName) {
-           const iconTrigger = element.querySelector('.node-icon-trigger');
-           if (iconTrigger) {
-               iconTrigger.innerHTML = `<i data-lucide="${this.escapeHtml(iconName)}"></i>`;
-           }
-      }
   },
 
   createNodeElement(nodeData, index) {
@@ -1667,8 +1530,7 @@ const Canvas = {
   handleNodeFieldFocus(element) {
     if (!element) return;
     this.isNodeFieldEditing = true;
-    this.isNodeFieldEditing = true;
-    // this.stopPolling(); // Don't stop polling, we simply don't update this field if focused
+    this.stopPolling(); // KILL polling completely while editing
     this.activeEditableField = element;
     element.classList.remove('has-error');
     element.classList.remove('is-saving');
@@ -1722,7 +1584,7 @@ const Canvas = {
     this.isNodeFieldEditing = false;
     this.activeEditableField = null;
     element.contentEditable = 'false'; 
-    // this.startPolling(); // Polling never stopped
+    this.startPolling();
 
     this.updateEditablePlaceholderState(element);
     
