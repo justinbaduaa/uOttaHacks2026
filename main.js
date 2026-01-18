@@ -275,6 +275,10 @@ ipcMain.handle("api-create-node", async (event, { token, payload }) => {
     outputs: payload?.outputs || [],
     evidence: payload?.evidence,
   };
+  if (payload?.x !== undefined && payload?.y !== undefined) {
+    body.x = payload.x;
+    body.y = payload.y;
+  }
   return apiRequest({ path: "/nodes", method: "POST", token, body });
 });
 
@@ -302,6 +306,10 @@ ipcMain.handle("api-update-node", async (event, { token, nodeId, payload }) => {
   }
   if (payload.evidence !== undefined) {
     body.evidence = payload.evidence;
+  }
+  if (payload.x !== undefined && payload.y !== undefined) {
+    body.x = payload.x;
+    body.y = payload.y;
   }
   return apiRequest({ path: `/nodes/${nodeId}`, method: "PATCH", token, body });
 });
