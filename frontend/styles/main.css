@@ -900,7 +900,7 @@ html, body {
   border-radius: var(--radius-md);
   background: transparent;
   border: none;
-  color: var(--text-tertiary);
+  color: #8b7cf5;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -909,8 +909,8 @@ html, body {
 }
 
 .node-expand-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--accent);
+  background: rgba(139, 124, 245, 0.1);
+  color: #a59af7;
 }
 
 .node-expand-btn svg {
@@ -1069,22 +1069,27 @@ html, body {
 
 /* Node Output Section (Expandable) */
 .node-output {
-  margin-top: var(--space-3);
-  padding: var(--space-4);
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-lg);
+  margin-top: var(--space-4);
+  margin-left: calc(var(--space-5) * -1);
+  margin-right: calc(var(--space-5) * -1);
+  margin-bottom: calc(var(--space-5) * -1);
+  padding: var(--space-4) var(--space-5);
+  background: #1a1a24;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   opacity: 0;
   max-height: 0;
   overflow: hidden;
-  transition: all var(--transition-base);
+  transition: all 0.25s ease;
 }
 
 .glass-node.expanded .node-output {
   opacity: 1;
   max-height: 200px;
+  padding: var(--space-4) var(--space-5);
 }
 
 .node-output-header {
