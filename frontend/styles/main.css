@@ -481,6 +481,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-canvas);
+  position: relative;
 }
 
 /* Header */
@@ -490,9 +491,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(13, 13, 13, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .breadcrumb {
