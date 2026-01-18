@@ -948,6 +948,60 @@ body {
   color: #3b82f6;
 }
 
+/* Node Assignee */
+.node-assignee {
+  margin-left: auto;
+}
+
+.assignee-button {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  border: 1px dashed var(--border-default);
+  background: transparent;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all var(--transition-fast);
+  --avatar-color: var(--accent);
+}
+
+.assignee-button:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.assignee-button.assigned {
+  border: none;
+  background: var(--avatar-color);
+  color: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.assignee-button.assigned:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.assignee-initials {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.assignee-icon {
+  width: 14px;
+  height: 14px;
+}
+
 
 /* Node Footer Toggle (Bottom) */
 .node-footer-toggle {
@@ -1575,7 +1629,104 @@ button {
   opacity: 0.3;
   cursor: default;
 }
+/* User Picker Popover */
+.user-picker-popover {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  display: none;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+}
 
+.user-picker-popover.is-visible {
+  display: block;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.user-picker-section {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.user-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  border: none;
+  background: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-align: left;
+}
+
+.user-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.user-option-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.user-option-avatar.is-agent {
+  background: linear-gradient(135deg, #ec4899, #8b5cf6);
+  color: white;
+}
+
+.user-option-avatar.is-user {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+}
+
+.user-option-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-option-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.user-option-status {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.user-option-active {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-done);
+  border: 2px solid var(--bg-secondary);
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+}
 /* Icon Picker Popover */
 .icon-picker-popover {
   position: fixed;

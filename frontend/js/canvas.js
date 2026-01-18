@@ -245,6 +245,7 @@ const Canvas = {
 
     this.setupEventListeners();
     this.setupGlobalIconPopover();
+    this.setupGlobalUserPicker();
     this.updateProfile();
     this.renderSidebar();
     this.updateBreadcrumb();
@@ -1244,6 +1245,13 @@ const Canvas = {
             </span>
             <span>${layerCount}</span>
           </div>
+          
+          <div class="node-assignee">
+            <button class="assignee-button" aria-label="Assign User">
+              <span class="assignee-initials" style="display: none;">JB</span>
+              <i data-lucide="user-plus" class="assignee-icon"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Start Output Toggle -->
@@ -1401,6 +1409,18 @@ const Canvas = {
       });
     }
 
+
+
+    // 5. Assignee Toggle
+    const assigneeBtn = element.querySelector('.assignee-button');
+    if (assigneeBtn) {
+       assigneeBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+       assigneeBtn.addEventListener('click', (e) => {
+         e.stopPropagation();
+         e.preventDefault();
+         this.toggleUserPicker(e, nodeData, assigneeBtn);
+       });
+    }
 
     // Drag listeners (Target node-content but exclude interactive elements)
     element.addEventListener('mousedown', (e) => {
@@ -2049,6 +2069,150 @@ const Canvas = {
     this.scale = 1;
     this.updateCanvasTransform();
     this.refreshCurrentView();
+  },
+
+  setupGlobalUserPicker() {
+    this.userPickerPopover = document.createElement('div');
+    this.userPickerPopover.className = 'user-picker-popover';
+    this.userPickerPopover.innerHTML = `
+      <div class="user-picker-content">
+         <!-- Content injected dynamically -->
+      </div>
+    `;
+    document.body.appendChild(this.userPickerPopover);
+
+    // Close on click outside
+    document.addEventListener('click', (e) => {
+      if (this.userPickerPopover && 
+          this.userPickerPopover.classList.contains('is-visible') && 
+          !this.userPickerPopover.contains(e.target) && 
+          !e.target.closest('.assignee-button')) {
+        this.userPickerPopover.classList.remove('is-visible');
+      }
+    });
+  },
+
+  toggleUserPicker(e, nodeData, triggerBtn) {
+    if (!this.userPickerPopover) return;
+    
+    // Toggle visibility if clicking same trigger
+    const isVisible = this.userPickerPopover.classList.contains('is-visible');
+    if (isVisible && this.activeUserPickerNodeId === nodeData.id) {
+       this.userPickerPopover.classList.remove('is-visible');
+       this.activeUserPickerNodeId = null;
+       return;
+    }
+
+    // Prepare User List
+    const content = this.userPickerPopover.querySelector('.user-picker-content');
+    
+    // 1. Agent Option
+    let html = `
+      <div class="user-picker-section">AI Agents</div>
+      <button class="user-option" data-type="agent" data-id="agent-001" data-name="Glass Agent" data-color="#ec4899">
+        <div class="user-option-avatar is-agent"><i data-lucide="bot"></i></div>
+        <div class="user-option-info">
+          <span class="user-option-name">Glass Agent</span>
+          <span class="user-option-status">Always online</span>
+        </div>
+      </button>
+    `;
+
+    // 2. Active Users
+    const activeUsers = this.state.activeUsers || [];
+    // Add current user to list if not present
+    const currentUserSub = this.getCurrentUserSub();
+    // In a real app we'd fetch full user profiles. Here we mock "Me" + active users.
+    const usersList = [...activeUsers];
+    if (!usersList.some(u => u.sub === currentUserSub)) {
+       usersList.unshift({ sub: currentUserSub, name: 'Me', color: '#2563eb' });
+    }
+
+    if (usersList.length > 0) {
+       html += `<div class="user-picker-section">Active Users</div>`;
+       usersList.forEach(user => {
+         const name = user.name || 'Anonymous';
+         const initials = name.substring(0, 2).toUpperCase();
+         const color = user.color || '#3b82f6';
+         html += `
+           <button class="user-option" data-type="user" data-id="${this.escapeHtml(user.sub)}" data-name="${this.escapeHtml(name)}" data-initials="${initials}" data-color="${color}">
+             <div class="user-option-avatar is-user" style="background: ${color}">
+               ${initials}
+               <span class="user-option-active"></span>
+             </div>
+             <div class="user-option-info">
+               <span class="user-option-name">${this.escapeHtml(name)}</span>
+               <span class="user-option-status">Active now</span>
+             </div>
+           </button>
+         `;
+       });
+    }
+
+    content.innerHTML = html;
+    
+    if (window.lucide) window.lucide.createIcons({ root: content });
+
+    // Position
+    const rect = triggerBtn.getBoundingClientRect();
+    this.userPickerPopover.style.top = `${rect.bottom + 8}px`;
+    // Align right edge of popover with right edge of button if close to edge, else left align
+    const popoverWidth = 260;
+    if (rect.left + popoverWidth > window.innerWidth - 20) {
+       this.userPickerPopover.style.left = `${rect.right - popoverWidth}px`;
+    } else {
+       this.userPickerPopover.style.left = `${rect.left}px`;
+    }
+    
+    this.userPickerPopover.classList.add('is-visible');
+    this.activeUserPickerNodeId = nodeData.id;
+
+    // Handle Selection
+    const buttons = content.querySelectorAll('.user-option');
+    buttons.forEach(btn => {
+      btn.onclick = (evt) => {
+         evt.stopPropagation();
+         const type = btn.dataset.type;
+         const name = btn.dataset.name;
+         const color = btn.dataset.color || '#2563eb';
+         const id = btn.dataset.id;
+         const initials = btn.dataset.initials || '';
+         
+         this.updateNodeAssignee(nodeData, { type, id, name, color, initials });
+         this.userPickerPopover.classList.remove('is-visible');
+      };
+    });
+  },
+
+  updateNodeAssignee(nodeData, assignee) {
+     // Save locally
+     nodeData.assignee = assignee;
+     
+     // Update DOM
+     const node = this.nodes.find(n => n.data.id === nodeData.id);
+     if (node) {
+        const assigneeBtn = node.element.querySelector('.assignee-button');
+        const initialsEl = assigneeBtn.querySelector('.assignee-initials');
+        const iconEl = assigneeBtn.querySelector('.assignee-icon');
+        
+        if (assigneeBtn && initialsEl && iconEl) {
+           assigneeBtn.classList.add('assigned');
+           assigneeBtn.style.setProperty('--avatar-color', assignee.color);
+           
+           if (assignee.type === 'agent') {
+              initialsEl.innerHTML = '<i data-lucide="bot" style="width:14px;height:14px;"></i>';
+              initialsEl.style.display = 'flex';
+              iconEl.style.display = 'none';
+              if (window.lucide) window.lucide.createIcons({ root: initialsEl });
+           } else {
+              initialsEl.textContent = assignee.initials || assignee.name.substring(0,2).toUpperCase();
+              initialsEl.style.display = 'flex';
+              iconEl.style.display = 'none';
+           }
+        }
+     }
+     
+     // Optionally save to API here via Api.updateNode
   },
 
   navigateToRoot() {
