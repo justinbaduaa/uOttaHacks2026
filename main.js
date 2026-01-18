@@ -253,11 +253,22 @@ ipcMain.handle("api-create-canvas", async (event, { token, name }) => {
   return apiRequest({ path: "/canvases", method: "POST", token, body: { name } });
 });
 
-ipcMain.handle("api-list-nodes", async (event, { token, canvasId }) => {
+ipcMain.handle("api-join-canvas", async (event, { token, code }) => {
+  return apiRequest({
+    path: "/canvases/join",
+    method: "POST",
+    token,
+    body: { joinCode: code },
+  });
+});
+
+ipcMain.handle("api-list-nodes", async (event, { token, canvasId, updatedSince, includeAll = true }) => {
   const params = new URLSearchParams({
     canvasId,
-    includeAll: "true",
-    includeDeleted: "false",
+    includeAll: includeAll ? "true" : "false",
   });
+  if (updatedSince) {
+    params.set("updatedSince", updatedSince);
+  }
   return apiRequest({ path: `/nodes?${params.toString()}`, method: "GET", token });
 });

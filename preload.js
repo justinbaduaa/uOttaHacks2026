@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('glassBox', {
   api: {
     listCanvases: (token) => ipcRenderer.invoke('api-list-canvases', token),
     createCanvas: (token, name) => ipcRenderer.invoke('api-create-canvas', { token, name }),
-    listNodes: (token, canvasId) => ipcRenderer.invoke('api-list-nodes', { token, canvasId }),
+    joinCanvas: (token, code) => ipcRenderer.invoke('api-join-canvas', { token, code }),
+    listNodes: (token, canvasId, updatedSince) => ipcRenderer.invoke('api-list-nodes', { token, canvasId, updatedSince }),
   },
 });

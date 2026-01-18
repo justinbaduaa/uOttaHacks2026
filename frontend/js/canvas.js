@@ -72,10 +72,18 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
-  listNodes(canvasId) {
+  joinCanvas(code) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.joinCanvas) {
+      return window.glassBox.api.joinCanvas(token, code);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  listNodes(canvasId, updatedSince) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.listNodes) {
-      return window.glassBox.api.listNodes(token, canvasId);
+      return window.glassBox.api.listNodes(token, canvasId, updatedSince);
     }
     return Promise.reject(new Error('API bridge unavailable'));
   },
@@ -88,14 +96,20 @@ const Canvas = {
   selectedNode: null,
   state: {
     canvases: [],
+    myCanvases: [],
+    sharedCanvases: [],
     selectedCanvasId: null,
     nodes: [],
     nodesById: {},
     childrenByParent: {},
+    lastSyncByCanvas: {},
     isLoadingCanvases: false,
     isLoadingNodes: false,
     isCreatingCanvas: false,
+    isJoiningCanvas: false,
+    isShowingCode: false,
     createCanvasError: null,
+    joinCanvasError: null,
     canvasesError: null,
   },
   isDragging: false,
@@ -105,6 +119,9 @@ const Canvas = {
   canvasOffset: { x: 0, y: 0 },
   scale: 1,
   currentPath: [],
+  pollIntervalMs: 7000,
+  pollTimer: null,
+  pollInFlight: false,
 
   init() {
     this.container = document.getElementById('canvasContainer');
@@ -114,13 +131,29 @@ const Canvas = {
     this.profileButton = document.getElementById('userProfile');
     this.profileLetter = document.getElementById('userProfileLetter');
     this.canvasLoading = document.getElementById('canvasLoading');
-    this.canvasCreate = document.getElementById('canvasCreate');
+    this.canvasActions = document.querySelector('.canvas-actions');
     this.canvasCreateToggle = document.getElementById('canvasCreateToggle');
     this.canvasCreateForm = document.getElementById('canvasCreateForm');
     this.canvasCreateInput = document.getElementById('canvasCreateInput');
     this.canvasCreateSubmit = document.getElementById('canvasCreateSubmit');
     this.canvasCreateCancel = document.getElementById('canvasCreateCancel');
     this.canvasCreateError = document.getElementById('canvasCreateError');
+    this.canvasJoinToggle = document.getElementById('canvasJoinToggle');
+    this.canvasJoinForm = document.getElementById('canvasJoinForm');
+    this.canvasJoinInput = document.getElementById('canvasJoinInput');
+    this.canvasJoinSubmit = document.getElementById('canvasJoinSubmit');
+    this.canvasJoinCancel = document.getElementById('canvasJoinCancel');
+    this.canvasJoinError = document.getElementById('canvasJoinError');
+    this.canvasCode = document.getElementById('canvasCode');
+    this.canvasCodeToggle = document.getElementById('canvasCodeToggle');
+    this.canvasCodePanel = document.getElementById('canvasCodePanel');
+    this.canvasCodeValue = document.getElementById('canvasCodeValue');
+    this.canvasCodeHint = document.getElementById('canvasCodeHint');
+
+    if (this.canvasCodePanel) {
+      this.canvasCodePanel.hidden = true;
+      this.state.isShowingCode = false;
+    }
 
     this.setupEventListeners();
     this.updateProfile();
@@ -213,11 +246,49 @@ const Canvas = {
       }
     });
 
+    this.canvasJoinToggle.addEventListener('click', () => {
+      this.openJoinCanvas();
+    });
+
+    this.canvasJoinSubmit.addEventListener('click', () => {
+      this.submitJoinCanvas();
+    });
+
+    this.canvasJoinCancel.addEventListener('click', () => {
+      this.closeJoinCanvas();
+    });
+
+    this.canvasJoinInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.submitJoinCanvas();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeJoinCanvas();
+      }
+    });
+
+    if (this.canvasCodeToggle) {
+      this.canvasCodeToggle.addEventListener('click', () => {
+        this.toggleCodePanel();
+      });
+    }
+
     document.addEventListener('click', (e) => {
-      if (!this.state.isCreatingCanvas) return;
-      if (this.canvasCreate && !this.canvasCreate.contains(e.target)) {
+      if (this.state.isCreatingCanvas && this.canvasActions && !this.canvasActions.contains(e.target)) {
         this.closeCreateCanvas();
       }
+      if (this.state.isJoiningCanvas && this.canvasActions && !this.canvasActions.contains(e.target)) {
+        this.closeJoinCanvas();
+      }
+      if (this.state.isShowingCode && this.canvasCode && !this.canvasCode.contains(e.target)) {
+        this.closeCodePanel();
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      this.stopPolling();
     });
   },
 
@@ -236,14 +307,21 @@ const Canvas = {
       return;
     }
 
-    if (this.state.canvases.length === 0) {
-      this.sidebarList.innerHTML = `
-        <div class="canvas-list-message">No canvases yet.</div>
-      `;
-      return;
-    }
+    const mySection = this.renderCanvasSection(
+      'My Canvases',
+      this.state.myCanvases,
+      'No canvases yet.'
+    );
+    const sharedSection = this.renderCanvasSection(
+      'Shared Canvases',
+      this.state.sharedCanvases,
+      'No shared canvases yet.'
+    );
+    this.sidebarList.innerHTML = `${mySection}${sharedSection}`;
+  },
 
-    this.sidebarList.innerHTML = this.state.canvases.map(canvas => {
+  renderCanvasSection(title, canvases, emptyMessage) {
+    let items = canvases.map(canvas => {
       const selected = canvas.id === this.state.selectedCanvasId;
       return `
         <button class="box-item ${selected ? 'selected' : ''}" data-id="${canvas.id}">
@@ -257,6 +335,19 @@ const Canvas = {
         </button>
       `;
     }).join('');
+
+    if (!items) {
+      items = `<div class="canvas-list-message">${this.escapeHtml(emptyMessage)}</div>`;
+    }
+
+    return `
+      <div class="canvas-list-section">
+        <div class="canvas-list-header">${this.escapeHtml(title)}</div>
+        <div class="canvas-list-group">
+          ${items}
+        </div>
+      </div>
+    `;
   },
 
   async loadCanvases() {
@@ -266,20 +357,34 @@ const Canvas = {
 
     try {
       const canvases = await Api.listCanvases();
+      const currentSub = this.getCurrentUserSub();
       const normalized = (canvases || []).map(canvas => ({
         id: canvas.canvasId,
         name: canvas.name || 'Untitled Canvas',
-        joinedAt: canvas.joinedAt || canvas.createdAt || '',
+        joinedAt: this.normalizeIsoTimestamp(canvas.joinedAt || canvas.createdAt || ''),
+        ownerSub: canvas.ownerSub || '',
+        joinCode: canvas.joinCode || '',
+        isShared: !!(currentSub && canvas.ownerSub && canvas.ownerSub !== currentSub),
       }));
 
       normalized.sort((a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || ''));
       this.state.canvases = normalized;
+      this.partitionCanvases();
       this.state.isLoadingCanvases = false;
       this.renderSidebar();
+      this.updateCodePanel();
 
       if (normalized.length > 0) {
-        await this.selectCanvas(normalized[0].id);
+        const preferred = this.state.myCanvases[0] || this.state.sharedCanvases[0];
+        if (preferred) {
+          await this.selectCanvas(preferred.id);
+        }
       } else {
+        this.state.selectedCanvasId = null;
+        this.stopPolling();
+        this.updateBreadcrumb();
+        this.closeCodePanel();
+        this.updateCodePanel();
         this.renderNodes([]);
       }
     } catch (error) {
@@ -289,15 +394,49 @@ const Canvas = {
     }
   },
 
+  partitionCanvases() {
+    const currentSub = this.getCurrentUserSub();
+    const myCanvases = [];
+    const sharedCanvases = [];
+
+    this.state.canvases.forEach((canvas) => {
+      const isShared = canvas.isShared || (!!currentSub && canvas.ownerSub && canvas.ownerSub !== currentSub);
+      canvas.isShared = isShared;
+      if (isShared) {
+        sharedCanvases.push(canvas);
+      } else {
+        myCanvases.push(canvas);
+      }
+    });
+
+    const sorter = (a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || '');
+    myCanvases.sort(sorter);
+    sharedCanvases.sort(sorter);
+
+    this.state.myCanvases = myCanvases;
+    this.state.sharedCanvases = sharedCanvases;
+  },
+
+  getCurrentUserSub() {
+    const payload = Auth.token ? parseJwt(Auth.token) : null;
+    return payload && payload.sub ? payload.sub : '';
+  },
+
   async selectCanvas(canvasId) {
     if (!canvasId || this.state.selectedCanvasId === canvasId) {
       return;
     }
+    this.stopPolling();
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
     this.renderSidebar();
     this.updateBreadcrumb();
+    this.closeCodePanel();
+    this.updateCodePanel();
     await this.loadNodesForCanvas(canvasId);
+    if (this.state.selectedCanvasId === canvasId) {
+      this.startPolling();
+    }
   },
 
   async loadNodesForCanvas(canvasId) {
@@ -313,6 +452,10 @@ const Canvas = {
         .filter(node => !node.deletedAt)
         .map(node => this.normalizeNodeFromApi(node));
       this.state.nodes = normalized;
+      const latestUpdate = this.getLatestUpdatedAt(normalized);
+      if (latestUpdate) {
+        this.state.lastSyncByCanvas[canvasId] = latestUpdate;
+      }
       this.buildNodeIndex();
       this.renderNodes(this.getRootNodes());
     } catch (error) {
@@ -334,8 +477,17 @@ const Canvas = {
       this.closeCreateCanvas();
       return;
     }
+    if (this.state.isJoiningCanvas) {
+      this.closeJoinCanvas();
+    }
     this.state.isCreatingCanvas = true;
     this.canvasCreateForm.classList.add('is-open');
+    if (this.canvasCreateToggle) {
+      this.canvasCreateToggle.classList.add('is-active');
+    }
+    if (this.canvasJoinToggle) {
+      this.canvasJoinToggle.classList.remove('is-active');
+    }
     this.canvasCreateError.textContent = '';
     this.canvasCreateInput.value = '';
     this.canvasCreateInput.focus();
@@ -344,6 +496,9 @@ const Canvas = {
   closeCreateCanvas() {
     this.state.isCreatingCanvas = false;
     this.canvasCreateForm.classList.remove('is-open');
+    if (this.canvasCreateToggle) {
+      this.canvasCreateToggle.classList.remove('is-active');
+    }
     this.canvasCreateError.textContent = '';
     this.canvasCreateInput.value = '';
   },
@@ -372,9 +527,13 @@ const Canvas = {
       const canvas = {
         id: created.canvasId,
         name: created.name || name,
-        joinedAt: new Date().toISOString(),
+        joinedAt: this.normalizeIsoTimestamp(new Date().toISOString()),
+        ownerSub: this.getCurrentUserSub(),
+        joinCode: created.joinCode || '',
+        isShared: false,
       };
       this.state.canvases = [canvas, ...this.state.canvases];
+      this.partitionCanvases();
       this.closeCreateCanvas();
       this.renderSidebar();
       this.selectCanvas(canvas.id);
@@ -385,11 +544,314 @@ const Canvas = {
     }
   },
 
+  openJoinCanvas() {
+    if (this.state.isJoiningCanvas) {
+      this.closeJoinCanvas();
+      return;
+    }
+    if (this.state.isCreatingCanvas) {
+      this.closeCreateCanvas();
+    }
+    this.state.isJoiningCanvas = true;
+    this.canvasJoinForm.classList.add('is-open');
+    if (this.canvasJoinToggle) {
+      this.canvasJoinToggle.classList.add('is-active');
+    }
+    if (this.canvasCreateToggle) {
+      this.canvasCreateToggle.classList.remove('is-active');
+    }
+    this.canvasJoinError.textContent = '';
+    this.canvasJoinInput.value = '';
+    this.canvasJoinInput.focus();
+  },
+
+  closeJoinCanvas() {
+    this.state.isJoiningCanvas = false;
+    this.canvasJoinForm.classList.remove('is-open');
+    if (this.canvasJoinToggle) {
+      this.canvasJoinToggle.classList.remove('is-active');
+    }
+    this.canvasJoinError.textContent = '';
+    this.canvasJoinInput.value = '';
+  },
+
+  async submitJoinCanvas() {
+    if (!this.state.isJoiningCanvas) {
+      this.openJoinCanvas();
+      return;
+    }
+
+    const rawCode = this.canvasJoinInput.value.trim().toUpperCase();
+    if (!rawCode) {
+      this.canvasJoinError.textContent = 'Join code cannot be empty.';
+      return;
+    }
+
+    if (!/^[A-Z0-9]{8,10}$/.test(rawCode)) {
+      this.canvasJoinError.textContent = 'Enter a valid join code.';
+      return;
+    }
+
+    this.canvasJoinError.textContent = '';
+    this.canvasJoinSubmit.disabled = true;
+
+    try {
+      const joined = await Api.joinCanvas(rawCode);
+      const existing = this.state.canvases.find((canvas) => canvas.id === joined.canvasId);
+      if (!existing) {
+        const canvas = {
+          id: joined.canvasId,
+          name: joined.name || 'Untitled Canvas',
+          joinedAt: this.normalizeIsoTimestamp(new Date().toISOString()),
+          ownerSub: '',
+          joinCode: '',
+          isShared: true,
+        };
+        this.state.canvases = [canvas, ...this.state.canvases];
+        this.partitionCanvases();
+      }
+      this.closeJoinCanvas();
+      this.renderSidebar();
+      this.selectCanvas(joined.canvasId);
+    } catch (error) {
+      const message = String(error.message || 'Failed to join canvas.');
+      if (message.toLowerCase().includes('not found')) {
+        this.canvasJoinError.textContent = 'Invalid code.';
+      } else if (message.toLowerCase().includes('already')) {
+        this.canvasJoinError.textContent = 'Already joined.';
+      } else {
+        this.canvasJoinError.textContent = message;
+      }
+    } finally {
+      this.canvasJoinSubmit.disabled = false;
+    }
+  },
+
   setCanvasLoading(isLoading) {
     if (this.canvasLoading) {
       this.canvasLoading.hidden = !isLoading;
       this.canvasLoading.style.display = isLoading ? 'flex' : 'none';
     }
+  },
+
+  toggleCodePanel() {
+    if (!this.canvasCodePanel) return;
+    if (this.state.isShowingCode) {
+      this.closeCodePanel();
+    } else {
+      this.openCodePanel();
+    }
+  },
+
+  openCodePanel() {
+    if (!this.canvasCodePanel) return;
+    this.updateCodePanel();
+    this.canvasCodePanel.hidden = false;
+    this.state.isShowingCode = true;
+  },
+
+  closeCodePanel() {
+    if (!this.canvasCodePanel) return;
+    this.canvasCodePanel.hidden = true;
+    this.state.isShowingCode = false;
+  },
+
+  updateCodePanel() {
+    if (!this.canvasCodeToggle || !this.canvasCodeValue || !this.canvasCodeHint) return;
+    const selectedCanvas = this.getCanvasById(this.state.selectedCanvasId);
+
+    if (!selectedCanvas) {
+      this.canvasCodeToggle.disabled = true;
+      this.canvasCodeValue.textContent = '--';
+      this.canvasCodeHint.textContent = 'Select a canvas to view its code.';
+      return;
+    }
+
+    this.canvasCodeToggle.disabled = false;
+
+    if (selectedCanvas.joinCode) {
+      this.canvasCodeValue.textContent = String(selectedCanvas.joinCode).toUpperCase();
+      this.canvasCodeHint.textContent = 'Share to invite collaborators.';
+      return;
+    }
+
+    if (selectedCanvas.isShared) {
+      this.canvasCodeValue.textContent = '--';
+      this.canvasCodeHint.textContent = 'Codes are only available for your canvases.';
+      return;
+    }
+
+    this.canvasCodeValue.textContent = '--';
+    this.canvasCodeHint.textContent = 'Code unavailable for this canvas.';
+  },
+
+  startPolling() {
+    this.stopPolling();
+    if (!this.state.selectedCanvasId || !Api.getAuthToken()) {
+      return;
+    }
+    this.pollTimer = setInterval(() => {
+      this.pollNodes();
+    }, this.pollIntervalMs);
+  },
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.pollInFlight = false;
+  },
+
+  async pollNodes() {
+    if (this.pollInFlight) return;
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId || !Api.getAuthToken()) {
+      this.stopPolling();
+      return;
+    }
+    if (this.state.isLoadingNodes) {
+      return;
+    }
+
+    this.pollInFlight = true;
+    try {
+      const updatedSince = this.getUpdatedSinceForPoll(canvasId);
+      const nodes = await Api.listNodes(canvasId, updatedSince);
+      if (!Array.isArray(nodes) || nodes.length === 0) {
+        return;
+      }
+      const normalized = (nodes || []).map(node => this.normalizeNodeFromApi(node));
+      const latestUpdate = this.getLatestUpdatedAt(normalized);
+      this.applyNodeUpdates(normalized);
+      if (latestUpdate) {
+        this.state.lastSyncByCanvas[canvasId] = latestUpdate;
+      }
+    } catch (error) {
+      console.warn('[Canvas] Polling failed', error);
+    } finally {
+      this.pollInFlight = false;
+    }
+  },
+
+  applyNodeUpdates(incomingNodes) {
+    if (!incomingNodes || incomingNodes.length === 0) {
+      return;
+    }
+
+    const prevView = this.getViewContext();
+    const renderedById = new Map(this.nodes.map(node => [node.data.id, node]));
+    const removedIds = new Set();
+    const updatedIds = new Set();
+    const newNodes = [];
+
+    incomingNodes.forEach((incoming) => {
+      if (incoming.deletedAt) {
+        removedIds.add(incoming.id);
+        this.state.nodes = this.state.nodes.filter(node => node.id !== incoming.id);
+        return;
+      }
+
+      const existing = this.state.nodesById[incoming.id];
+      if (existing) {
+        this.updateNodeData(existing, incoming);
+        updatedIds.add(incoming.id);
+        return;
+      }
+
+      this.state.nodes.push(incoming);
+      newNodes.push(incoming);
+    });
+
+    this.buildNodeIndex();
+    this.syncCurrentPath();
+
+    const nextView = this.getViewContext();
+    const viewChanged =
+      prevView.mode !== nextView.mode ||
+      prevView.parentId !== nextView.parentId ||
+      prevView.nodeId !== nextView.nodeId;
+
+    if (viewChanged) {
+      this.renderNodes(this.getCurrentViewNodes());
+      this.updateBreadcrumb();
+      return;
+    }
+
+    removedIds.forEach((id) => {
+      const rendered = renderedById.get(id);
+      if (rendered) {
+        rendered.element.remove();
+        this.nodes = this.nodes.filter(node => node.data.id !== id);
+      }
+    });
+
+    updatedIds.forEach((id) => {
+      const rendered = renderedById.get(id);
+      if (rendered) {
+        this.updateNodeElement(rendered);
+      }
+    });
+
+    newNodes.forEach((node) => {
+      if (this.isNodeVisibleInView(node, nextView)) {
+        const entry = this.createNodeElement(node, this.nodes.length);
+        this.nodes.push(entry);
+        this.canvas.appendChild(entry.element);
+      }
+    });
+
+    this.updateBreadcrumb();
+  },
+
+  updateNodeData(target, source) {
+    Object.keys(source).forEach((key) => {
+      target[key] = source[key];
+    });
+  },
+
+  getViewContext() {
+    if (this.currentPath.length === 0) {
+      return { mode: 'children', parentId: null, nodeId: null };
+    }
+
+    const current = this.currentPath[this.currentPath.length - 1];
+    const children = this.getChildNodes(current.id);
+    if (children.length > 0) {
+      return { mode: 'children', parentId: current.id, nodeId: null };
+    }
+    return { mode: 'single', parentId: null, nodeId: current.id };
+  },
+
+  getCurrentViewNodes() {
+    const view = this.getViewContext();
+    if (view.mode === 'children') {
+      return this.getChildNodes(view.parentId);
+    }
+    const node = this.getNode(view.nodeId);
+    return node ? [node] : [];
+  },
+
+  isNodeVisibleInView(node, view) {
+    if (!node || !view) return false;
+    if (view.mode === 'children') {
+      return node.parent === view.parentId;
+    }
+    return node.id === view.nodeId;
+  },
+
+  syncCurrentPath() {
+    if (this.currentPath.length === 0) return;
+    const updatedPath = [];
+    for (const node of this.currentPath) {
+      const updated = this.state.nodesById[node.id];
+      if (!updated) {
+        this.currentPath = [];
+        return;
+      }
+      updatedPath.push(updated);
+    }
+    this.currentPath = updatedPath;
   },
 
   renderNodes(nodeDataArray) {
@@ -423,12 +885,29 @@ const Canvas = {
 
     element.style.transform = `translate(${x}px, ${y}px)`;
 
+    element.innerHTML = this.getNodeInnerHtml(nodeData);
+
+    // Drag listeners
+    element.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.startDrag(e, element, x, y);
+    });
+
+    // Double-click to navigate into node
+    element.addEventListener('dblclick', () => {
+      this.navigateIntoNode(nodeData);
+    });
+
+    return { element, data: nodeData, x, y };
+  },
+
+  getNodeInnerHtml(nodeData) {
     const evidenceCount = nodeData.evidence?.length || 0;
     const statusLabel = this.getStatusLabel(nodeData.status);
     const statusClass = this.getStatusClass(nodeData.status);
     const createdLabel = nodeData.createdAt ? this.formatTimestamp(nodeData.createdAt) : '--';
 
-    element.innerHTML = `
+    return `
       <div class="node-content">
         <h3 class="node-title">${this.escapeHtml(nodeData.name)}</h3>
         <p class="node-description">${this.escapeHtml(nodeData.goal)}</p>
@@ -466,19 +945,11 @@ const Canvas = {
         </div>
       </div>
     `;
+  },
 
-    // Drag listeners
-    element.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      this.startDrag(e, element, x, y);
-    });
-
-    // Double-click to navigate into node
-    element.addEventListener('dblclick', () => {
-      this.navigateIntoNode(nodeData);
-    });
-
-    return { element, data: nodeData, x, y };
+  updateNodeElement(nodeEntry) {
+    if (!nodeEntry || !nodeEntry.element) return;
+    nodeEntry.element.innerHTML = this.getNodeInnerHtml(nodeEntry.data);
   },
 
   startDrag(e, element, currentX, currentY) {
@@ -602,9 +1073,7 @@ const Canvas = {
   },
 
   updateBreadcrumb() {
-    const selectedCanvas = this.state.canvases.find(
-      (canvas) => canvas.id === this.state.selectedCanvasId
-    );
+    const selectedCanvas = this.getCanvasById(this.state.selectedCanvasId);
     const rootLabel = selectedCanvas ? selectedCanvas.name : 'Workspace';
     let html = `
       <button class="breadcrumb-item ${this.currentPath.length === 0 ? 'active' : ''}" data-id="root">
@@ -623,6 +1092,11 @@ const Canvas = {
     });
 
     this.breadcrumb.innerHTML = html;
+  },
+
+  getCanvasById(canvasId) {
+    if (!canvasId) return null;
+    return this.state.canvases.find((canvas) => canvas.id === canvasId) || null;
   },
 
   buildNodeIndex() {
@@ -655,6 +1129,50 @@ const Canvas = {
     return Object.values(this.state.nodesById);
   },
 
+  getLatestUpdatedAt(nodes) {
+    let latest = '';
+    (nodes || []).forEach((node) => {
+      const normalized = this.normalizeIsoTimestamp(node.updatedAt || '');
+      if (normalized && (!latest || normalized > latest)) {
+        latest = normalized;
+      }
+    });
+    return latest;
+  },
+
+  normalizeIsoTimestamp(timestamp) {
+    if (!timestamp || typeof timestamp !== 'string') {
+      return '';
+    }
+
+    const match = timestamp.match(
+      /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+    );
+    if (!match) {
+      return timestamp;
+    }
+
+    const base = match[1];
+    const fraction = match[2] ? match[2].slice(1) : '';
+    const zone = match[3];
+    const ms = fraction ? fraction.padEnd(3, '0').slice(0, 3) : '000';
+
+    return `${base}.${ms}${zone}`;
+  },
+
+  getUpdatedSinceForPoll(canvasId) {
+    const normalized = this.normalizeIsoTimestamp(this.state.lastSyncByCanvas[canvasId] || '');
+    if (!normalized) {
+      return '';
+    }
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return normalized;
+    }
+    parsed.setMilliseconds(parsed.getMilliseconds() - 1);
+    return parsed.toISOString();
+  },
+
   normalizeNodeFromApi(node) {
     const evidence = this.normalizeEvidence(node);
     const status = this.deriveStatus(node, evidence.length);
@@ -670,8 +1188,9 @@ const Canvas = {
       author,
       children: [],
       parent: node.parentNodeId === 'ROOT' ? null : node.parentNodeId,
-      createdAt: node.createdAt || '',
-      updatedAt: node.updatedAt || '',
+      createdAt: this.normalizeIsoTimestamp(node.createdAt || ''),
+      updatedAt: this.normalizeIsoTimestamp(node.updatedAt || ''),
+      deletedAt: node.deletedAt || '',
     };
   },
 

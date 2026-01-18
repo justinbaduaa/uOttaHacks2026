@@ -58,29 +58,44 @@
 
         <div class="sidebar-section">
           <div class="section-header">
-            <span>CANVASES</span>
+            <span>Current Canvases</span>
           </div>
           <div class="glass-boxes-list" id="sidebarBoxesList">
             <!-- Populated by JS -->
           </div>
-          <div class="canvas-create" id="canvasCreate">
-            <button class="canvas-create-toggle" id="canvasCreateToggle">
-              <span class="canvas-create-icon">+</span>
-              <span>New canvas</span>
-            </button>
-            <div class="canvas-create-form" id="canvasCreateForm">
+          <div class="canvas-actions">
+            <div class="canvas-action-row">
+              <button class="canvas-action-split" id="canvasCreateToggle">New</button>
+              <div class="canvas-action-divider"></div>
+              <button class="canvas-action-split" id="canvasJoinToggle">Join</button>
+            </div>
+            <div class="canvas-action-form" id="canvasCreateForm">
               <input
                 type="text"
                 id="canvasCreateInput"
-                class="canvas-create-input"
+                class="canvas-action-input"
                 placeholder="Name your canvas..."
                 maxlength="40"
               />
-              <div class="canvas-create-actions">
-                <button class="canvas-create-submit" id="canvasCreateSubmit">Create</button>
-                <button class="canvas-create-cancel" id="canvasCreateCancel">Cancel</button>
+              <div class="canvas-action-actions">
+                <button class="canvas-action-submit" id="canvasCreateSubmit">Create</button>
+                <button class="canvas-action-cancel" id="canvasCreateCancel">Cancel</button>
               </div>
-              <div class="canvas-create-error" id="canvasCreateError"></div>
+              <div class="canvas-action-error" id="canvasCreateError"></div>
+            </div>
+            <div class="canvas-action-form" id="canvasJoinForm">
+              <input
+                type="text"
+                id="canvasJoinInput"
+                class="canvas-action-input"
+                placeholder="Enter join code"
+                maxlength="10"
+              />
+              <div class="canvas-action-actions">
+                <button class="canvas-action-submit" id="canvasJoinSubmit">Join</button>
+                <button class="canvas-action-cancel" id="canvasJoinCancel">Cancel</button>
+              </div>
+              <div class="canvas-action-error" id="canvasJoinError"></div>
             </div>
           </div>
         </div>
@@ -103,6 +118,14 @@
         <div class="canvas-container" id="canvasContainer">
           <div class="canvas" id="canvas">
             <!-- Nodes will be rendered here -->
+          </div>
+          <div class="canvas-code" id="canvasCode">
+            <button class="canvas-code-button" id="canvasCodeToggle">Code</button>
+            <div class="canvas-code-panel" id="canvasCodePanel" hidden>
+              <div class="canvas-code-title">Canvas Code</div>
+              <div class="canvas-code-value" id="canvasCodeValue">--</div>
+              <div class="canvas-code-hint" id="canvasCodeHint"></div>
+            </div>
           </div>
           <div class="canvas-loading" id="canvasLoading" hidden>
             <div class="spinner"></div>

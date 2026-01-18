@@ -95,11 +95,24 @@ def list_canvases_for_user(user_sub: str) -> List[Dict[str, Any]]:
         
         canvases = []
         for item in items:
+            canvas_id = item.get("SK").replace("CANVAS#", "")
+            owner_sub = item.get("ownerSub")
+            join_code = item.get("joinCode")
+
+            if not owner_sub or owner_sub == user_sub:
+                meta = get_canvas_meta(canvas_id)
+                if meta:
+                    if not owner_sub:
+                        owner_sub = meta.get("ownerSub")
+                    if owner_sub == user_sub and not join_code:
+                        join_code = meta.get("joinCode")
+
             canvases.append({
-                "canvasId": item.get("SK").replace("CANVAS#", ""),
+                "canvasId": canvas_id,
                 "name": item.get("name"),
                 "joinedAt": item.get("joinedAt"),
-                "ownerSub": item.get("ownerSub"),  # May be None if not owner
+                "ownerSub": owner_sub,  # May be None if not owner
+                "joinCode": join_code if owner_sub == user_sub else None,
             })
         
         return canvases
