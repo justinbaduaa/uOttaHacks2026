@@ -134,6 +134,7 @@ Authorization: Bearer <jwt-token>
 - `description` (string)
 - `inputs` (array of file items)
 - `outputs` (array of file items)
+- `evidence` (object with `notes` array of strings and `files` array of file items)
 - `authorSub` (Cognito user ID)
 - `createdAt` (ISO8601)
 - `updatedAt` (ISO8601)

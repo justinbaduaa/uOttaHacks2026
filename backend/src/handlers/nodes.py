@@ -23,6 +23,7 @@ from lib.validation import (
     validate_inputs_outputs,
     validate_iso8601,
     validate_node_id,
+    normalize_evidence,
 )
 
 logger = get_logger(__name__)
@@ -125,6 +126,7 @@ def create_node(event, context):
         description = body.get("description", "")
         inputs = body.get("inputs", [])
         outputs = body.get("outputs", [])
+        evidence = body.get("evidence")
 
         # Validate inputs/outputs
         if inputs:
@@ -136,6 +138,10 @@ def create_node(event, context):
             valid, error_msg = validate_inputs_outputs(outputs)
             if not valid:
                 return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        normalized_evidence, evidence_error = normalize_evidence(evidence)
+        if evidence_error:
+            return error_response(code="INVALID_REQUEST", message=evidence_error)
 
         # Generate node ID
         node_id = str(uuid.uuid4())
@@ -156,6 +162,7 @@ def create_node(event, context):
                 "description": description,
                 "inputs": inputs or [],
                 "outputs": outputs or [],
+                "evidence": normalized_evidence,
                 "authorSub": user_sub,
                 "createdAt": now,
                 "updatedAt": now,
@@ -172,6 +179,7 @@ def create_node(event, context):
             "description": description,
             "inputs": inputs or [],
             "outputs": outputs or [],
+            "evidence": normalized_evidence,
             "authorSub": user_sub,
             "createdAt": now,
             "updatedAt": now,
@@ -278,6 +286,13 @@ def update_node(event, context):
             expression_attribute_names["#outputs"] = "outputs"
             expression_attribute_values[":outputs"] = outputs
 
+        if "evidence" in body:
+            normalized_evidence, evidence_error = normalize_evidence(body.get("evidence"))
+            if evidence_error:
+                return error_response(code="INVALID_REQUEST", message=evidence_error)
+            update_expressions.append("evidence = :evidence")
+            expression_attribute_values[":evidence"] = normalized_evidence
+
         # Execute update
         table = get_nodes_table()
         update_expression = ", ".join(update_expressions)
@@ -300,6 +315,10 @@ def update_node(event, context):
 
         logger.info(f"Updated node {node_id} in canvas {canvas_id}")
 
+        evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+        if evidence_error:
+            evidence = {"notes": [], "files": []}
+
         # Transform to API format
         updated_node = {
             "nodeId": updated_item["nodeId"],
@@ -309,6 +328,7 @@ def update_node(event, context):
             "description": updated_item["description"],
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
+            "evidence": evidence,
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],

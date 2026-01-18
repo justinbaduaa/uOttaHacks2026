@@ -8,6 +8,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from .response import error_response, internal_error_response
+from .validation import normalize_evidence
 
 dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 canvas_table_name = os.environ["CANVAS_TABLE"]
@@ -214,6 +215,9 @@ def collect_subtree_nodes(canvas_id: str, root_node_id: str) -> List[str]:
 
 def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Transform DynamoDB node item to API format."""
+    evidence, evidence_error = normalize_evidence(item.get("evidence"))
+    if evidence_error:
+        evidence = {"notes": [], "files": []}
     return {
         "nodeId": item.get("nodeId"),
         "canvasId": item.get("canvasId"),
@@ -222,6 +226,7 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "description": item.get("description"),
         "inputs": item.get("inputs", []),
         "outputs": item.get("outputs", []),
+        "evidence": evidence,
         "authorSub": item.get("authorSub"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),

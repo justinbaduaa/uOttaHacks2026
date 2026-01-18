@@ -67,7 +67,7 @@ def generate_presigned_get_url(
 
 def extract_file_s3_keys_from_nodes(nodes: List[Dict]) -> List[str]:
     """
-    Extract all S3 keys from file references in nodes' inputs and outputs.
+    Extract all S3 keys from file references in nodes' inputs, outputs, and evidence.
     
     Returns list of S3 keys for files where type="file".
     """
@@ -82,6 +82,13 @@ def extract_file_s3_keys_from_nodes(nodes: List[Dict]) -> List[str]:
         for item in node.get("outputs", []):
             if item.get("type") == "file" and item.get("s3Key"):
                 s3_keys.append(item["s3Key"])
+
+        # Check evidence files
+        evidence = node.get("evidence")
+        if isinstance(evidence, dict):
+            for item in evidence.get("files", []):
+                if item.get("type") == "file" and item.get("s3Key"):
+                    s3_keys.append(item["s3Key"])
     
     return s3_keys
 

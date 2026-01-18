@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--description", default=os.getenv("NODE_DESCRIPTION", ""), help="Node description")
     parser.add_argument("--inputs-json", default=os.getenv("NODE_INPUTS_JSON", ""), help="JSON array for inputs")
     parser.add_argument("--outputs-json", default=os.getenv("NODE_OUTPUTS_JSON", ""), help="JSON array for outputs")
+    parser.add_argument("--evidence-json", default=os.getenv("NODE_EVIDENCE_JSON", ""), help="JSON object for evidence")
     parser.add_argument("--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")
     parser.add_argument("--auth-token", default=os.getenv("AUTH_TOKEN", ""), help="Bearer token or raw token")
     args = parser.parse_args()
@@ -36,6 +37,7 @@ def main() -> None:
 
     inputs = load_json_arg(args.inputs_json, "inputs-json")
     outputs = load_json_arg(args.outputs_json, "outputs-json")
+    evidence = load_json_arg(args.evidence_json, "evidence-json")
 
     print_title("Update Node")
     log("Canvas ID: " + canvas_id)
@@ -48,6 +50,8 @@ def main() -> None:
         log("Inputs JSON provided")
     if outputs is not None:
         log("Outputs JSON provided")
+    if evidence is not None:
+        log("Evidence JSON provided")
 
     body = {
         "canvasId": canvas_id,
@@ -60,6 +64,8 @@ def main() -> None:
         body["inputs"] = inputs
     if outputs is not None:
         body["outputs"] = outputs
+    if evidence is not None:
+        body["evidence"] = evidence
 
     request_json(
         method="PATCH",
