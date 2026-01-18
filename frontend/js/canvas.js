@@ -586,13 +586,13 @@ const Canvas = {
           <span class="box-dot"></span>
           <span class="box-name">${this.escapeHtml(canvas.name)}</span>
           <span class="box-chevron">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 6 15 12 9 18"/>
-            </svg>
+            <i data-lucide="chevron-right" width="12" height="12"></i>
           </span>
         </button>
       `;
     }).join('');
+    // Re-render icons after DOM update
+    if (window.lucide) window.lucide.createIcons();
   },
 
   async loadCanvases() {
@@ -743,6 +743,8 @@ const Canvas = {
       this.nodes.push(node);
       this.canvas.appendChild(node.element);
     });
+    // Re-render icons for new nodes
+    if (window.lucide) window.lucide.createIcons();
   },
 
   createNodeElement(nodeData, index) {
@@ -766,17 +768,11 @@ const Canvas = {
         <!-- Header with icon, title, expand button -->
         <div class="node-header">
           <span class="node-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
+            <i data-lucide="box"></i>
           </span>
           <h3 class="node-title">${this.escapeHtml(nodeData.name || 'Untitled')}</h3>
           <button class="node-expand-btn" aria-label="Expand output">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
+            <i data-lucide="chevron-down"></i>
           </button>
         </div>
         
@@ -793,28 +789,19 @@ const Canvas = {
         <div class="node-actions">
           <button class="action-btn folder">
             <span class="action-btn-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10 4H4c-1.11 0-2 .89-2 2v12c0 1.097.903 2 2 2h16c1.097 0 2-.903 2-2V8c0-1.11-.9-2-2-2h-8l-2-2z"/>
-              </svg>
+              <i data-lucide="folder" width="16" height="16"></i>
             </span>
             Folder
           </button>
           <button class="action-btn file">
             <span class="action-btn-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-                <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/>
-              </svg>
+              <i data-lucide="file" width="16" height="16"></i>
             </span>
             File
           </button>
           <button class="action-btn ticket">
             <span class="action-btn-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
-              </svg>
+              <i data-lucide="ticket" width="16" height="16"></i>
             </span>
             Ticket
           </button>
@@ -856,9 +843,7 @@ const Canvas = {
         <div class="node-output">
           <div class="node-output-header">
             <span class="output-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
+              <i data-lucide="play" width="24" height="24"></i>
             </span>
             <span class="output-title">Output</span>
           </div>

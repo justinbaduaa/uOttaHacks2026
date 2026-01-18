@@ -21,8 +21,8 @@
   /* Sidebar Colors */
   --sidebar-bg: #0d0d0d;
   --sidebar-hover: #1f1f1f;
-  --sidebar-active: rgba(124, 92, 255, 0.15);
-  --sidebar-active-text: #a78bfa;
+  --sidebar-active: rgba(37, 99, 235, 0.15);
+  --sidebar-active-text: #60a5fa;
   
   /* Border Colors */
   --border-subtle: #2a2a2a;
@@ -35,10 +35,11 @@
   --text-tertiary: #71717a;
   --text-muted: #52525b;
   
-  /* Accent Colors - Purple for enterprise feel */
-  --accent: #7c5cff;
-  --accent-light: rgba(124, 92, 255, 0.15);
-  --accent-hover: #6b4ce0;
+  /* Accent Colors - Blue for enterprise branding */
+  --accent: #2563eb;
+  --accent-light: rgba(37, 99, 235, 0.15);
+  --accent-hover: #1d4ed8;
+  --accent-muted: #3b82f6;
   
   /* Status Colors */
   --status-done: #22c55e;
@@ -165,7 +166,7 @@ html, body {
 .project-avatar {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -378,7 +379,7 @@ html, body {
 }
 
 .canvas-create-toggle:hover {
-  border-color: rgba(124, 92, 255, 0.5);
+  border-color: rgba(37, 99, 235, 0.5);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
@@ -387,7 +388,7 @@ html, body {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-full);
-  border: 1px solid rgba(124, 92, 255, 0.3);
+  border: 1px solid rgba(37, 99, 235, 0.3);
   background: var(--accent-light);
   color: var(--accent);
   display: inline-flex;
@@ -457,7 +458,7 @@ html, body {
 .canvas-create-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.2);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .canvas-create-actions {
@@ -566,7 +567,7 @@ html, body {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, #8B5CF6, #EC4899);
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
   border: none;
   display: inline-flex;
   align-items: center;
@@ -599,7 +600,7 @@ html, body {
   overflow: hidden;
   cursor: grab;
   background: 
-    radial-gradient(circle at 50% 0%, rgba(124, 92, 255, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 50%),
     var(--bg-canvas);
 }
 
@@ -655,7 +656,7 @@ html, body {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 2px solid rgba(124, 92, 255, 0.2);
+  border: 2px solid rgba(37, 99, 235, 0.2);
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
@@ -666,7 +667,7 @@ html, body {
   padding: var(--space-3);
   border-radius: var(--radius-lg);
   background: var(--bg-secondary);
-  border: 1px solid rgba(124, 92, 255, 0.25);
+  border: 1px solid rgba(37, 99, 235, 0.25);
   box-shadow: var(--shadow-card);
   transform: translate(-50%, -50%) scale(0.96);
   opacity: 0;
@@ -685,7 +686,7 @@ html, body {
   width: 100%;
   border: none;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, #7c5cff, #6b4ce0);
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: #fff;
   font-size: var(--text-sm);
   font-weight: 600;
@@ -694,14 +695,14 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  box-shadow: 0 12px 24px rgba(124, 92, 255, 0.35);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.35);
   cursor: pointer;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
 }
 
 .node-create-action:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 32px rgba(124, 92, 255, 0.45);
+  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.45);
 }
 
 .node-create-action:disabled {
@@ -827,7 +828,7 @@ html, body {
   position: absolute;
   width: 360px;
   background: var(--bg-secondary);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-sm);
   padding: var(--space-5);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border-subtle);
@@ -850,7 +851,7 @@ html, body {
 
 .glass-node.focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2), var(--shadow-lg);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2), var(--shadow-lg);
 }
 
 .node-content {
@@ -870,7 +871,7 @@ html, body {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #7c5cff, #6b4ce0);
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -957,7 +958,7 @@ html, body {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   outline: none;
-  box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.35);
 }
 
 .node-notes-input:empty::before {
@@ -1035,11 +1036,11 @@ html, body {
 }
 
 .stat-item.files .stat-item-icon {
-  color: #7c5cff;
+  color: #2563eb;
 }
 
 .stat-item.layers .stat-item-icon {
-  color: #818cf8;
+  color: #3b82f6;
 }
 
 .chart-btn {
@@ -1169,12 +1170,12 @@ html, body {
 }
 
 .node-editable:focus {
-  background: rgba(124, 92, 255, 0.1);
-  box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.35), 0 0 0 4px rgba(124, 92, 255, 0.15);
+  background: rgba(37, 99, 235, 0.1);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.35), 0 0 0 4px rgba(37, 99, 235, 0.15);
 }
 
 .node-editable.is-saving {
-  background: rgba(124, 92, 255, 0.15);
+  background: rgba(37, 99, 235, 0.15);
 }
 
 .node-editable.has-error {
