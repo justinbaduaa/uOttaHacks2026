@@ -84,6 +84,7 @@ def create_canvas(event, context):
                 "name": name,
                 "joinedAt": now,
                 "ownerSub": user_sub,
+                "joinCode": join_code,
             }
         )
 

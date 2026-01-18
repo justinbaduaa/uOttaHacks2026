@@ -1,7 +1,7 @@
 """Node-related Lambda handlers."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from lib.auth import require_auth
@@ -10,9 +10,11 @@ from lib.dynamodb import (
     collect_subtree_nodes,
     get_node,
     get_nodes_table,
+    list_active_members,
     query_nodes_by_canvas,
     query_nodes_by_parent,
     require_membership,
+    touch_member_presence,
 )
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
@@ -28,6 +30,26 @@ from lib.validation import (
 )
 
 logger = get_logger(__name__)
+PRESENCE_WINDOW_SECONDS = 25
+
+
+def get_display_name(event: Dict, user_sub: str) -> str:
+    """Derive a display name from JWT claims."""
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    )
+    email = claims.get("email")
+    if email:
+        return str(email)
+    username = claims.get("cognito:username") or claims.get("username")
+    if username:
+        return str(username)
+    if user_sub:
+        return f"User {user_sub[-4:]}"
+    return "User"
 
 
 def get_nodes(event, context):
@@ -58,6 +80,12 @@ def get_nodes(event, context):
         if not is_member:
             return membership_error
 
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat().replace("+00:00", "Z")
+        display_name = get_display_name(event, user_sub)
+        touch_member_presence(canvas_id, user_sub, display_name, now_iso)
+        active_since = now - timedelta(seconds=PRESENCE_WINDOW_SECONDS)
+
         # Get parent node ID (default to ROOT)
         parent_node_id = params.get("parentNodeId", "ROOT")
         include_all = params.get("includeAll", "").lower() in ("1", "true", "yes")
@@ -75,12 +103,17 @@ def get_nodes(event, context):
         else:
             nodes = query_nodes_by_parent(canvas_id, parent_node_id, updated_since)
 
+        active_users = list_active_members(canvas_id, active_since)
+
         logger.info(
             f"Retrieved {len(nodes)} nodes for canvas {canvas_id}, "
             f"parent {parent_node_id}, includeAll={include_all}"
         )
 
-        return success_response(nodes)
+        return success_response({
+            "nodes": nodes,
+            "activeUsers": active_users,
+        })
 
     except Exception as e:
         logger.error(f"Error getting nodes: {str(e)}", exc_info=True)

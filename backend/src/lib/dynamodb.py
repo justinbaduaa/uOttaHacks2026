@@ -84,6 +84,64 @@ def require_membership(canvas_id: str, user_sub: str) -> tuple[bool, Optional[Di
     return True, None
 
 
+def touch_member_presence(canvas_id: str, user_sub: str, display_name: str, last_active_at: str) -> None:
+    """Update member presence fields on a canvas membership record."""
+    table = get_canvas_table()
+    try:
+        table.update_item(
+            Key={
+                "PK": f"CANVAS#{canvas_id}",
+                "SK": f"MEMBER#{user_sub}",
+            },
+            UpdateExpression="SET lastActiveAt = :lastActiveAt, displayName = :displayName",
+            ExpressionAttributeValues={
+                ":lastActiveAt": last_active_at,
+                ":displayName": display_name,
+            },
+        )
+    except Exception:
+        # Best-effort presence update
+        return
+
+
+def list_active_members(canvas_id: str, active_since: datetime) -> List[Dict[str, Any]]:
+    """List active members for a canvas based on lastActiveAt."""
+    table = get_canvas_table()
+    try:
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq(f"CANVAS#{canvas_id}") & Key("SK").begins_with("MEMBER#"),
+        )
+        items = response.get("Items", [])
+        active_users = []
+
+        for item in items:
+            last_active = item.get("lastActiveAt")
+            if not last_active:
+                continue
+            try:
+                last_active_dt = datetime.fromisoformat(last_active.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if last_active_dt < active_since:
+                continue
+
+            user_sub = item.get("SK", "").replace("MEMBER#", "")
+            if not user_sub:
+                continue
+            display_name = item.get("displayName") or f"User {user_sub[-4:]}"
+            initial = display_name[0].upper() if display_name else "?"
+            active_users.append({
+                "userId": user_sub,
+                "displayName": display_name,
+                "initial": initial,
+                "lastActiveAt": last_active,
+            })
+
+        return active_users
+    except Exception:
+        return []
+
+
 def list_canvases_for_user(user_sub: str) -> List[Dict[str, Any]]:
     """List all canvases for a user using USER#{userSub} PK pattern."""
     table = get_canvas_table()
@@ -95,11 +153,24 @@ def list_canvases_for_user(user_sub: str) -> List[Dict[str, Any]]:
         
         canvases = []
         for item in items:
+            canvas_id = item.get("SK").replace("CANVAS#", "")
+            owner_sub = item.get("ownerSub")
+            join_code = item.get("joinCode")
+
+            if not owner_sub or owner_sub == user_sub:
+                meta = get_canvas_meta(canvas_id)
+                if meta:
+                    if not owner_sub:
+                        owner_sub = meta.get("ownerSub")
+                    if owner_sub == user_sub and not join_code:
+                        join_code = meta.get("joinCode")
+
             canvases.append({
-                "canvasId": item.get("SK").replace("CANVAS#", ""),
+                "canvasId": canvas_id,
                 "name": item.get("name"),
                 "joinedAt": item.get("joinedAt"),
-                "ownerSub": item.get("ownerSub"),  # May be None if not owner
+                "ownerSub": owner_sub,  # May be None if not owner
+                "joinCode": join_code if owner_sub == user_sub else None,
             })
         
         return canvases
