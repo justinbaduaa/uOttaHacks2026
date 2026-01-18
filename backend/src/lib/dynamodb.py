@@ -8,6 +8,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from .response import error_response, internal_error_response
+from .validation import normalize_evidence
 
 dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 canvas_table_name = os.environ["CANVAS_TABLE"]
@@ -140,25 +141,29 @@ def query_nodes_by_parent(
     canvas_id: str,
     parent_node_id: str,
     updated_since: Optional[str] = None,
+    include_deleted: bool = False,
 ) -> List[Dict[str, Any]]:
     """Query nodes by parent using GSI1."""
     table = get_nodes_table()
     try:
         gsi1pk = f"CANVAS#{canvas_id}#PARENT#{parent_node_id}"
-        
+
+        query_params: Dict[str, Any] = {
+            "IndexName": "GSI1",
+        }
+
         if updated_since:
-            # Query with updatedSince filter using sort key prefix
             gsi1sk_prefix = f"UPDATED#{updated_since}"
-            response = table.query(
-                IndexName="GSI1",
-                KeyConditionExpression=Key("GSI1PK").eq(gsi1pk) & Key("GSI1SK").gt(gsi1sk_prefix),
+            query_params["KeyConditionExpression"] = (
+                Key("GSI1PK").eq(gsi1pk) & Key("GSI1SK").gt(gsi1sk_prefix)
             )
         else:
-            # Query all children
-            response = table.query(
-                IndexName="GSI1",
-                KeyConditionExpression=Key("GSI1PK").eq(gsi1pk),
-            )
+            query_params["KeyConditionExpression"] = Key("GSI1PK").eq(gsi1pk)
+
+        if not include_deleted:
+            query_params["FilterExpression"] = Attr("deletedAt").not_exists()
+
+        response = table.query(**query_params)
         
         items = response.get("Items", [])
         nodes = []
@@ -170,7 +175,38 @@ def query_nodes_by_parent(
         return []
 
 
-def get_node(canvas_id: str, node_id: str) -> Optional[Dict[str, Any]]:
+def query_nodes_by_canvas(
+    canvas_id: str,
+    updated_since: Optional[str] = None,
+    include_deleted: bool = False,
+) -> List[Dict[str, Any]]:
+    """Query all nodes in a canvas, optionally filtering by updatedSince."""
+    table = get_nodes_table()
+    try:
+        query_params: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(f"CANVAS#{canvas_id}") & Key("SK").begins_with("NODE#"),
+        }
+
+        filter_expression = None
+        if updated_since:
+            filter_expression = Attr("updatedAt").gt(updated_since)
+        if not include_deleted:
+            deleted_filter = Attr("deletedAt").not_exists()
+            filter_expression = deleted_filter if filter_expression is None else filter_expression & deleted_filter
+        if filter_expression is not None:
+            query_params["FilterExpression"] = filter_expression
+
+        response = table.query(**query_params)
+        items = response.get("Items", [])
+        nodes = []
+        for item in items:
+            nodes.append(_transform_node_item(item))
+        return nodes
+    except Exception:
+        return []
+
+
+def get_node(canvas_id: str, node_id: str, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
     """Get a single node by canvasId and nodeId."""
     table = get_nodes_table()
     try:
@@ -182,6 +218,8 @@ def get_node(canvas_id: str, node_id: str) -> Optional[Dict[str, Any]]:
         )
         item = response.get("Item")
         if not item:
+            return None
+        if not include_deleted and item.get("deletedAt"):
             return None
         return _transform_node_item(item)
     except Exception:
@@ -214,6 +252,9 @@ def collect_subtree_nodes(canvas_id: str, root_node_id: str) -> List[str]:
 
 def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Transform DynamoDB node item to API format."""
+    evidence, evidence_error = normalize_evidence(item.get("evidence"))
+    if evidence_error:
+        evidence = {"notes": [], "files": []}
     return {
         "nodeId": item.get("nodeId"),
         "canvasId": item.get("canvasId"),
@@ -222,7 +263,9 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "description": item.get("description"),
         "inputs": item.get("inputs", []),
         "outputs": item.get("outputs", []),
+        "evidence": evidence,
         "authorSub": item.get("authorSub"),
+        "deletedAt": item.get("deletedAt"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
     }
@@ -266,3 +309,39 @@ def batch_delete_nodes(canvas_id: str, node_ids: List[str]) -> int:
             pass
     
     return deleted_count
+
+
+def mark_nodes_deleted(
+    canvas_id: str,
+    node_ids: List[str],
+    deleted_at: str,
+    user_sub: str,
+) -> int:
+    """Mark nodes as deleted by setting deletedAt and updatedAt."""
+    table = get_nodes_table()
+    updated_count = 0
+
+    for node_id in node_ids:
+        try:
+            table.update_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": f"NODE#{node_id}",
+                },
+                UpdateExpression=(
+                    "SET deletedAt = :deletedAt, updatedAt = :now, "
+                    "authorSub = :authorSub, GSI1SK = :gsi1sk"
+                ),
+                ExpressionAttributeValues={
+                    ":deletedAt": deleted_at,
+                    ":now": deleted_at,
+                    ":authorSub": user_sub,
+                    ":gsi1sk": f"UPDATED#{deleted_at}#NODE#{node_id}",
+                },
+                ConditionExpression=Attr("PK").exists() & Attr("SK").exists(),
+            )
+            updated_count += 1
+        except Exception:
+            continue
+
+    return updated_count

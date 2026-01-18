@@ -86,6 +86,8 @@ Authorization: Bearer <jwt-token>
 #### Node Management
 
 - `GET /nodes?canvasId={id}&parentNodeId={id}&updatedSince={iso8601}` - List nodes
+- `GET /nodes?canvasId={id}&updatedSince={iso8601}&includeAll=true` - List all nodes updated since
+- `GET /nodes?canvasId={id}&updatedSince={iso8601}&includeAll=true&includeDeleted=true` - Include deleted nodes (tombstones)
 - `POST /nodes` - Create a new node
 - `PATCH /nodes/{nodeId}` - Update a node
 - `DELETE /nodes/{nodeId}?canvasId={id}` - Delete node and descendants
@@ -134,7 +136,9 @@ Authorization: Bearer <jwt-token>
 - `description` (string)
 - `inputs` (array of file items)
 - `outputs` (array of file items)
+- `evidence` (object with `notes` array of strings and `files` array of file items)
 - `authorSub` (Cognito user ID)
+- `deletedAt` (ISO8601 when soft-deleted, otherwise absent)
 - `createdAt` (ISO8601)
 - `updatedAt` (ISO8601)
 
