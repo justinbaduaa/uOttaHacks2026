@@ -1455,6 +1455,7 @@ button {
     linear-gradient(180deg, #141312 0%, #0f0e0d 100%);
   color: var(--text-primary);
   position: relative;
+  padding-top: 52px;
 }
 
 .evidence-sidebar::before {
