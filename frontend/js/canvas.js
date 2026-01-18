@@ -765,46 +765,44 @@ const Canvas = {
 
     element.innerHTML = `
       <div class="node-content">
-        <!-- Header with icon, title, expand button -->
+        <!-- Header with icon, title (Cleaned up) -->
         <div class="node-header">
           <span class="node-icon">
             <i data-lucide="box"></i>
           </span>
           <h3 class="node-title">${this.escapeHtml(nodeData.name || 'Untitled')}</h3>
-          <button class="node-expand-btn" aria-label="Expand output">
-            <i data-lucide="chevron-down"></i>
-          </button>
         </div>
         
         <!-- Description -->
         <p class="node-description">${this.escapeHtml(nodeData.goal || 'Description')}</p>
         
-        <!-- Notes Section -->
-        <div class="node-notes-section">
-          <span class="node-notes-label">Notes:</span>
-          <div class="node-notes-input" contenteditable="true" data-node-id="${nodeData.id}"></div>
-        </div>
+
         
-        <!-- Action Buttons -->
-        <div class="node-actions">
-          <button class="action-btn folder">
-            <span class="action-btn-icon">
-              <i data-lucide="folder" width="16" height="16"></i>
+        </div>
+
+        <!-- Input Section -->
+        <div class="node-input">
+          <div class="node-input-header">
+            <span class="input-icon">
+              <i data-lucide="inbox"></i>
             </span>
-            Folder
-          </button>
-          <button class="action-btn file">
-            <span class="action-btn-icon">
-              <i data-lucide="file" width="16" height="16"></i>
-            </span>
-            File
-          </button>
-          <button class="action-btn ticket">
-            <span class="action-btn-icon">
-              <i data-lucide="ticket" width="16" height="16"></i>
-            </span>
-            Ticket
-          </button>
+            <span class="input-title">Input</span>
+          </div>
+          <div class="node-input-list">
+            <!-- Mock Inputs -->
+            <div class="input-item">
+              <span class="input-item-icon"><i data-lucide="file-text"></i></span>
+              <span class="input-item-text">Project Requirements.pdf</span>
+            </div>
+            <div class="input-item">
+              <span class="input-item-icon"><i data-lucide="link"></i></span>
+              <span class="input-item-text">Figma Mockups</span>
+            </div>
+             <div class="input-item">
+              <span class="input-item-icon"><i data-lucide="image"></i></span>
+              <span class="input-item-text">Reference_Image.png</span>
+            </div>
+          </div>
         </div>
         
         <!-- Stats Footer -->
@@ -830,14 +828,14 @@ const Canvas = {
             </span>
             <span>${layerCount}</span>
           </div>
-          <button class="chart-btn" aria-label="View stats">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="4" y="10" width="4" height="10" rx="1"/>
-              <rect x="10" y="4" width="4" height="16" rx="1"/>
-              <rect x="16" y="8" width="4" height="12" rx="1"/>
-            </svg>
-          </button>
+          </div>
         </div>
+
+        <!-- Start Output Toggle (Bottom of Card) -->
+        <button class="node-footer-toggle" aria-label="Toggle Output">
+          <span class="adjust-text">View Output</span>
+          <i data-lucide="chevron-down"></i>
+        </button>
         
         <!-- Output Section (expandable) -->
         <div class="node-output">
@@ -856,14 +854,7 @@ const Canvas = {
       </div>
     `;
 
-    // Expand button toggle
-    const expandBtn = element.querySelector('.node-expand-btn');
-    if (expandBtn) {
-      expandBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        element.classList.toggle('expanded');
-      });
-    }
+
 
     this.attachNodeEditing(element, nodeData);
 
@@ -897,6 +888,16 @@ const Canvas = {
     if (!element || !nodeData) return;
     const titleEl = element.querySelector('.node-title');
     const descriptionEl = element.querySelector('.node-description');
+    
+    // Toggle Logic with new footer button
+    const toggleBtn = element.querySelector('.node-footer-toggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('mousedown', (e) => e.stopPropagation()); // Prevent drag
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        element.classList.toggle('expanded');
+      });
+    }
 
     const config = [
       {
