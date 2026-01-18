@@ -210,6 +210,7 @@ const Canvas = {
     this.canvasCodeHint = document.getElementById('canvasCodeHint');
 
     this.setupEventListeners();
+    this.setupGlobalIconPopover();
     this.updateProfile();
     this.renderSidebar();
     this.updateBreadcrumb();
@@ -1101,48 +1102,61 @@ const Canvas = {
 
     element.style.transform = `translate(${x}px, ${y}px)`;
 
-    const fileCount = nodeData.evidence?.length || 21;
-    const layerCount = this.getChildNodes(nodeData.id)?.length || 3;
+    const iconName = nodeData.icon || 'box';
+    const inputs = nodeData.inputs || [];
+    // If no inputs (new node), showing some mocks provided by user request or keep empty
+    // The user request said "drop in it... add a number of resources... dropdown to view"
+    // So we start empty or with existing data.
+
+    const fileCount = inputs.length + (nodeData.evidence?.length || 0); 
+    const layerCount = this.getChildNodes(nodeData.id)?.length || 0;
 
     element.innerHTML = `
       <div class="node-content">
-        <!-- Header with icon, title (Cleaned up) -->
+        <!-- Header -->
         <div class="node-header">
-          <span class="node-icon">
-            <i data-lucide="box"></i>
-          </span>
+          <button class="node-icon-trigger" aria-label="Change Icon">
+            <i data-lucide="${this.escapeHtml(iconName)}"></i>
+          </button>
           <h3 class="node-title">${this.escapeHtml(nodeData.name || 'Untitled')}</h3>
+          <button class="node-nav-entry" aria-label="Enter Box">
+            <i data-lucide="arrow-right"></i>
+          </button>
         </div>
         
         <!-- Description -->
         <p class="node-description">${this.escapeHtml(nodeData.goal || 'Description')}</p>
         
-
-        
-        </div>
-
-        <!-- Input Section -->
+        <!-- Drop Zone & Input Section -->
         <div class="node-input">
           <div class="node-input-header">
-            <span class="input-icon">
-              <i data-lucide="inbox"></i>
-            </span>
-            <span class="input-title">Input</span>
+            <span class="input-icon"><i data-lucide="inbox"></i></span>
+            <span class="input-title">Input (${fileCount})</span>
+            <button class="input-list-toggle" aria-label="Toggle Inputs" ${fileCount === 0 ? 'disabled' : ''}>
+               <i data-lucide="chevron-down"></i>
+            </button>
           </div>
-          <div class="node-input-list">
-            <!-- Mock Inputs -->
-            <div class="input-item">
-              <span class="input-item-icon"><i data-lucide="file-text"></i></span>
-              <span class="input-item-text">Project Requirements.pdf</span>
-            </div>
-            <div class="input-item">
-              <span class="input-item-icon"><i data-lucide="link"></i></span>
-              <span class="input-item-text">Figma Mockups</span>
-            </div>
-             <div class="input-item">
-              <span class="input-item-icon"><i data-lucide="image"></i></span>
-              <span class="input-item-text">Reference_Image.png</span>
-            </div>
+          
+          <div class="input-list-container" style="display: none;">
+             <div class="input-list">
+                ${inputs.map(input => `
+                  <div class="input-item">
+                    <span class="input-item-icon"><i data-lucide="${this.escapeHtml(input.icon || 'file')}"></i></span>
+                    <span class="input-item-text">${this.escapeHtml(input.name)}</span>
+                  </div>
+                `).join('')}
+                ${(nodeData.evidence || []).map(file => `
+                  <div class="input-item">
+                     <span class="input-item-icon"><i data-lucide="file"></i></span>
+                     <span class="input-item-text">${this.escapeHtml(typeof file === 'string' ? file : 'File')}</span>
+                  </div>
+                `).join('')}
+             </div>
+          </div>
+
+          <div class="drop-zone">
+             <i data-lucide="upload-cloud"></i>
+             <span>Drop files here</span>
           </div>
         </div>
         
@@ -1150,40 +1164,28 @@ const Canvas = {
         <div class="node-stats-footer">
           <div class="stat-item files">
             <span class="stat-item-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                <rect x="14" y="14" width="7" height="7" rx="1"/>
-              </svg>
+              <i data-lucide="files"></i>
             </span>
-            <span>${fileCount}</span>
+            <span class="file-count-text">${fileCount}</span>
           </div>
           <div class="stat-item layers">
             <span class="stat-item-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2"/>
-                <path d="M2 12l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2"/>
-              </svg>
+              <i data-lucide="layers"></i>
             </span>
             <span>${layerCount}</span>
           </div>
-          </div>
         </div>
 
-        <!-- Start Output Toggle (Bottom of Card) -->
+        <!-- Start Output Toggle -->
         <button class="node-footer-toggle" aria-label="Toggle Output">
           <span class="adjust-text">View Output</span>
           <i data-lucide="chevron-down"></i>
         </button>
         
-        <!-- Output Section (expandable) -->
+        <!-- Output Section -->
         <div class="node-output">
           <div class="node-output-header">
-            <span class="output-icon">
-              <i data-lucide="play" width="24" height="24"></i>
-            </span>
+            <span class="output-icon"><i data-lucide="play"></i></span>
             <span class="output-title">Output</span>
           </div>
           <p class="node-output-description">Create filtered views that you can save and share with others</p>
@@ -1195,22 +1197,91 @@ const Canvas = {
       </div>
     `;
 
-
-
     this.attachNodeEditing(element, nodeData);
 
-    // Drag listeners
+    // --- Event Listeners for New Features ---
+
+    // 1. Icon Trigger
+    const iconBtn = element.querySelector('.node-icon-trigger');
+    if (iconBtn) {
+       console.log('Attaching icon listener');
+       iconBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+       iconBtn.addEventListener('click', (e) => {
+         e.stopPropagation();
+         e.preventDefault();
+         this.toggleIconPicker(e, nodeData, iconBtn);
+       });
+    }
+
+    // 2. Navigation Arrow
+    const navBtn = element.querySelector('.node-nav-entry');
+    if (navBtn) {
+       navBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+       navBtn.addEventListener('click', (e) => {
+         e.stopPropagation();
+         this.navigateIntoNode(nodeData);
+       });
+       navBtn.addEventListener('dblclick', (e) => e.stopPropagation());
+    }
+
+    // 3. Drop Zone
+    const dropZone = element.querySelector('.drop-zone');
+    const inputListContainer = element.querySelector('.input-list-container');
+    const inputList = element.querySelector('.input-list');
+    const inputToggle = element.querySelector('.input-list-toggle');
+    const inputTitle = element.querySelector('.input-title');
+    const fileCountText = element.querySelector('.file-count-text');
+
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
+      });
+      dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+      });
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+        this.handleNodeDrop(e, nodeData, inputList, inputToggle, inputTitle, fileCountText);
+      });
+       // Prevent drag start on the drop zone itself from moving the node
+       dropZone.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    // 4. Input Toggle
+    if (inputToggle) {
+       inputToggle.addEventListener('mousedown', (e) => e.stopPropagation());
+       inputToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isHidden = inputListContainer.style.display === 'none';
+          inputListContainer.style.display = isHidden ? 'block' : 'none';
+          inputToggle.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+       });
+    }
+
+
+    // Drag listeners (Target node-content but exclude interactive elements)
     element.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      if (this.isNodeFieldEditing || e.target.closest('.node-editable')) {
-        return;
-      }
-      this.startDrag(e, element, x, y);
+        if (
+            e.target.closest('.node-editable') || 
+            e.target.closest('button') || 
+            e.target.closest('.drop-zone') ||
+            this.isNodeFieldEditing
+        ) {
+            return;
+        }
+        e.stopPropagation();
+        this.startDrag(e, element, x, y);
     });
 
     // Double-click to navigate into node
     element.addEventListener('dblclick', (event) => {
-      if (event.target.closest('.node-editable')) {
+      if (event.target.closest('.node-editable') || event.target.closest('button')) {
         event.stopPropagation();
         return;
       }
@@ -1598,7 +1669,130 @@ const Canvas = {
 
     // Highlight briefly
     node.element.classList.add('focused');
-    setTimeout(() => node.element.classList.remove('focused'), 1000);
+    setTimeout(() => node.element.classList.remove('focused'), 2000);
+  },
+
+  handleNodeDrop(e, nodeData, listContainer, toggleBtn, titleEl, countEl) {
+    let files = [];
+    if (e.dataTransfer.items) {
+      files = [...e.dataTransfer.items].filter(item => item.kind === 'file').map(item => item.getAsFile());
+    } else {
+      files = [...e.dataTransfer.files];
+    }
+
+    if (files.length === 0) return;
+
+    if (!nodeData.inputs) nodeData.inputs = [];
+    
+    files.forEach(file => {
+      const input = {
+        name: file.name,
+        icon: 'file', // Default icon
+        type: file.type
+      };
+      nodeData.inputs.push(input);
+      
+      // Render Item
+      const itemEl = document.createElement('div');
+      itemEl.className = 'input-item';
+      itemEl.innerHTML = `
+         <span class="input-item-icon"><i data-lucide="file"></i></span>
+         <span class="input-item-text">${this.escapeHtml(file.name)}</span>
+      `;
+      if (window.lucide) window.lucide.createIcons(); // might be needed per item or batch
+      listContainer.appendChild(itemEl);
+    });
+
+    // Refresh Icons for the new items
+    if (window.lucide) window.lucide.createIcons();
+
+    // Update Counts
+    const total = nodeData.inputs.length + (nodeData.evidence?.length || 0);
+    if (titleEl) titleEl.textContent = `Input (${total})`;
+    if (countEl) countEl.textContent = total;
+    if (toggleBtn) toggleBtn.disabled = false;
+    
+    // Auto-show list
+    listContainer.parentElement.style.display = 'block'; // Ensure container is shown
+    if (toggleBtn) toggleBtn.style.transform = 'rotate(180deg)';
+  },
+
+  setupGlobalIconPopover() {
+    this.iconPopover = document.createElement('div');
+    this.iconPopover.className = 'icon-picker-popover';
+    this.iconPopover.innerHTML = `
+      <div class="icon-grid">
+         <!-- Icons will be injected here -->
+      </div>
+    `;
+    document.body.appendChild(this.iconPopover);
+
+    // Close on click outside
+    document.addEventListener('click', (e) => {
+      if (this.iconPopover && 
+          this.iconPopover.classList.contains('is-visible') && 
+          !this.iconPopover.contains(e.target) && 
+          !e.target.closest('.node-icon-trigger')) {
+        this.iconPopover.classList.remove('is-visible');
+      }
+    });
+  },
+
+  toggleIconPicker(e, nodeData, triggerBtn) {
+    if (!this.iconPopover) return;
+    
+    const isVisible = this.iconPopover.classList.contains('is-visible');
+    
+    if (isVisible && this.activeIconNodeId === nodeData.id) {
+       this.iconPopover.classList.remove('is-visible');
+       this.activeIconNodeId = null;
+       return;
+    }
+
+    // Populate Icons (Simple set for now)
+    const icons = ['box', 'layers', 'file', 'image', 'link', 'users', 'database', 'globe', 'settings', 'message-square', 'mail', 'calendar', 'check-square', 'list'];
+    const grid = this.iconPopover.querySelector('.icon-grid');
+    grid.innerHTML = icons.map(icon => `
+      <button class="icon-option" data-icon="${icon}">
+         <i data-lucide="${icon}"></i>
+      </button>
+    `).join('');
+    
+    if (window.lucide) window.lucide.createIcons({ root: grid });
+
+    // Position
+    const rect = triggerBtn.getBoundingClientRect();
+    this.iconPopover.style.top = `${rect.bottom + 8}px`;
+    this.iconPopover.style.left = `${rect.left}px`;
+    
+    this.iconPopover.classList.add('is-visible');
+    this.activeIconNodeId = nodeData.id;
+
+    // Handle Selection
+    const buttons = grid.querySelectorAll('.icon-option');
+    buttons.forEach(btn => {
+      btn.onclick = (evt) => {
+         evt.stopPropagation();
+         const newIcon = btn.dataset.icon;
+         this.updateNodeIcon(nodeData, newIcon);
+         this.iconPopover.classList.remove('is-visible');
+      };
+    });
+  },
+
+  updateNodeIcon(nodeData, iconName) {
+     nodeData.icon = iconName;
+     // Find the node element
+     const node = this.nodes.find(n => n.data.id === nodeData.id);
+     if (node) {
+        const triggerBtn = node.element.querySelector('.node-icon-trigger');
+        if (triggerBtn) {
+           // Re-create the <i> tag because Lucide replaces it with an <svg>
+           triggerBtn.innerHTML = `<i data-lucide="${iconName}"></i>`;
+           if (window.lucide) window.lucide.createIcons({ root: triggerBtn });
+        }
+     }
+     // Optionally save to API here
   },
 
   navigateIntoNode(nodeData) {
