@@ -3,6 +3,8 @@ const path = require("path");
 
 let mainWindow;
 
+const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -16,14 +18,16 @@ function createWindow() {
     },
     // Modern window appearance
     titleBarStyle: "hiddenInset",
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#F5F7FA",
   });
 
-  mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
-
-  // Open DevTools in development
-  if (process.env.NODE_ENV === "development") {
+  // In development, load from Vite dev server
+  if (isDev) {
+    mainWindow.loadURL("http://localhost:5173");
     mainWindow.webContents.openDevTools();
+  } else {
+    // In production, load built files
+    mainWindow.loadFile(path.join(__dirname, "frontend", "dist", "index.html"));
   }
 
   mainWindow.on("closed", () => {
