@@ -375,6 +375,27 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref CanvasTable
 
+  PresignDownloadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxPresignDownload
+      CodeUri: src/
+      Handler: handlers.files.presign_download
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /files/presign-download
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+        - S3ReadPolicy:
+            BucketName: !Ref FilesBucket
+
 Outputs:
   ApiUrl:
     Description: API Gateway HTTP API URL

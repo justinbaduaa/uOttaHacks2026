@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import threading
+import time
 import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -103,6 +104,22 @@ class _ExecuteRequestHandler(BaseHTTPRequestHandler):
             log.exception("Execute request failed: %s", exc)
             self._write_json(500, {"ok": False, "error": str(exc)})
 
+    def do_GET(self) -> None:
+        component = self.server.component
+        if not self.path.startswith("/stream"):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        if not component.async_loop or not component.async_loop.is_running():
+            self._write_json(503, {"ok": False, "error": "Gateway not ready"})
+            return
+
+        try:
+            component.handle_stream_request(self)
+        except Exception as exc:
+            log.exception("Stream request failed: %s", exc)
+
     def log_message(self, format: str, *args: Any) -> None:
         log.info("GatewayHTTP %s - %s", self.address_string(), format % args)
 
@@ -141,6 +158,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self.artifact_upload_mode = self.get_config("artifact_upload_mode", "s3")
         self.approval_poll_interval_seconds = int(
             self.get_config("approval_poll_interval_seconds", 5)
+        )
+        self.stream_poll_interval_seconds = int(
+            self.get_config("stream_poll_interval_seconds", 3)
         )
 
         self._http_server: Optional[_GatewayHttpServer] = None
@@ -222,7 +242,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if not approval_mode:
             approval_mode = self.approval_mode_default
 
-        resolved_inputs = await self._resolve_inputs(canvas_id, node, auth_token)
+        resolved_inputs, file_parts = await self._resolve_inputs_with_files(
+            canvas_id, node, auth_token
+        )
         task_context = {
             "type": "glassbox_task",
             "node": {
@@ -249,6 +271,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             ),
             a2a.create_data_part(data=task_context),
         ]
+        a2a_parts.extend(file_parts)
 
         if resolved_inputs:
             a2a_parts.append(
@@ -300,6 +323,59 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
 
         return {"taskId": task_id, "approvalMode": approval_mode}
 
+    def handle_stream_request(self, handler: BaseHTTPRequestHandler) -> None:
+        parsed = url_parse.urlparse(handler.path)
+        query = url_parse.parse_qs(parsed.query)
+        canvas_id = self._first_query_value(query, "canvasId")
+        node_id = self._first_query_value(query, "nodeId")
+        since = self._first_query_value(query, "since") or ""
+
+        if not canvas_id or not node_id:
+            self._write_stream_error(handler, "canvasId and nodeId are required")
+            return
+
+        payload: Dict[str, Any] = {}
+        auth_header = handler.headers.get("Authorization") or handler.headers.get("authorization")
+        if auth_header:
+            payload["userToken"] = auth_header
+
+        try:
+            auth_token = self._resolve_backend_token(payload)
+        except BackendError as exc:
+            self._write_stream_error(handler, str(exc))
+            return
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "keep-alive")
+        handler.end_headers()
+        handler.wfile.write(b"retry: 3000\n\n")
+        handler.wfile.flush()
+
+        last_seen = since
+        while not self.stop_signal.is_set():
+            try:
+                node = self._get_node_for_stream(canvas_id, node_id, auth_token)
+                entries = self._filter_activity_log(node.get("activityLog", []), last_seen)
+                if entries:
+                    last_seen = entries[-1].get("createdAt", last_seen)
+                    payload = {
+                        "canvasId": canvas_id,
+                        "nodeId": node_id,
+                        "entries": entries,
+                    }
+                    self._write_stream_event(handler, "activity_log", payload)
+                else:
+                    self._write_stream_comment(handler, "keep-alive")
+                time.sleep(self.stream_poll_interval_seconds)
+            except (BrokenPipeError, ConnectionResetError):
+                break
+            except Exception as exc:
+                log.exception("Stream polling failed: %s", exc)
+                self._write_stream_event(handler, "error", {"message": str(exc)})
+                time.sleep(self.stream_poll_interval_seconds)
+
     async def _extract_initial_claims(
         self, external_event_data: Any
     ) -> Optional[Dict[str, Any]]:
@@ -326,7 +402,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         assigned_to = node.get("assignedTo") or {}
         target_agent = assigned_to.get("id") or "GlassBoxWorker"
 
-        resolved_inputs = await self._resolve_inputs(canvas_id, node, auth_token)
+        resolved_inputs, file_parts = await self._resolve_inputs_with_files(
+            canvas_id, node, auth_token
+        )
         a2a_parts = [
             a2a.create_text_part(text="Execute the Glass Box node task."),
             a2a.create_data_part(
@@ -337,6 +415,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 }
             ),
         ]
+        a2a_parts.extend(file_parts)
 
         external_request_context = {
             "canvas_id": canvas_id,
@@ -885,6 +964,28 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             raise BackendError("Invalid presign response")
         return data
 
+    async def _backend_presign_download(
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: str,
+        file_item: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        body = {
+            "canvasId": canvas_id,
+            "nodeId": node_id,
+        }
+        if file_item.get("fileId"):
+            body["fileId"] = file_item.get("fileId")
+        if file_item.get("s3Key"):
+            body["s3Key"] = file_item.get("s3Key")
+        data = await self._backend_request(
+            "POST", "/files/presign-download", auth_token, body=body
+        )
+        if not isinstance(data, dict):
+            raise BackendError("Invalid presign download response")
+        return data
+
     async def _backend_complete_file(
         self,
         canvas_id: str,
@@ -1066,6 +1167,71 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 resolved.extend(referenced.get("evidence", []))
         return resolved
 
+    async def _resolve_inputs_with_files(
+        self, canvas_id: str, node: Dict[str, Any], auth_token: str
+    ) -> Tuple[List[Dict[str, Any]], List[ContentPart]]:
+        resolved_inputs = await self._resolve_inputs(canvas_id, node, auth_token)
+        file_parts = await self._build_file_parts(
+            canvas_id, node.get("nodeId", ""), auth_token, resolved_inputs
+        )
+        return resolved_inputs, file_parts
+
+    async def _build_file_parts(
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: str,
+        inputs: List[Dict[str, Any]],
+    ) -> List[ContentPart]:
+        file_parts: List[ContentPart] = []
+        seen_keys = set()
+        for item in inputs:
+            if item.get("type") != "file":
+                continue
+            dedupe_key = item.get("s3Key") or item.get("fileId") or item.get("filename")
+            if not dedupe_key or dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            file_part = await self._file_item_to_part(
+                canvas_id, node_id, auth_token, item
+            )
+            if file_part is not None:
+                file_parts.append(file_part)
+        return file_parts
+
+    async def _file_item_to_part(
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: str,
+        item: Dict[str, Any],
+    ) -> Optional[ContentPart]:
+        try:
+            presign = await self._backend_presign_download(
+                canvas_id, node_id, auth_token, item
+            )
+        except BackendError as exc:
+            log.warning("Presign download failed for %s: %s", item.get("filename"), exc)
+            return None
+
+        download_url = presign.get("downloadUrl")
+        if not download_url:
+            return None
+
+        file_bytes = await asyncio.to_thread(self._download_bytes_from_url, download_url)
+        if not file_bytes:
+            return None
+
+        filename = presign.get("filename") or item.get("filename") or "input.bin"
+        mime_type = presign.get("contentType") or item.get("contentType") or "application/octet-stream"
+        creator = getattr(a2a, "create_file_part_from_bytes", None)
+        if callable(creator):
+            return creator(content_bytes=file_bytes, name=filename, mime_type=mime_type)
+
+        encoded = base64.b64encode(file_bytes).decode("ascii")
+        file_content = {"name": filename, "mimeType": mime_type, "bytes": encoded}
+        return a2a.create_data_part(data={"type": "file_fallback", "file": file_content})
+
     async def _within_node_budget(
         self, canvas_id: str, node_id: str, auth_token: str
     ) -> bool:
@@ -1123,6 +1289,11 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 lines.append(f"- {item_type}: {item}")
         return "\n".join(lines)
 
+    def _download_bytes_from_url(self, url: str) -> bytes:
+        req = url_request.Request(url, method="GET")
+        with url_request.urlopen(req, timeout=self.backend_timeout_seconds) as response:
+            return response.read()
+
     def _extract_file_bytes(self, file_content: Any) -> bytes:
         raw_bytes = getattr(file_content, "bytes", None)
         if raw_bytes is None and isinstance(file_content, dict):
@@ -1132,6 +1303,51 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if isinstance(raw_bytes, str):
             return base64.b64decode(raw_bytes)
         return b""
+
+    def _get_node_for_stream(self, canvas_id: str, node_id: str, auth_token: str) -> Dict[str, Any]:
+        if not self.async_loop or not self.async_loop.is_running():
+            raise BackendError("Async loop not running")
+        future = asyncio.run_coroutine_threadsafe(
+            self._backend_get_node(canvas_id, node_id, auth_token),
+            self.async_loop,
+        )
+        return future.result(timeout=self.backend_timeout_seconds)
+
+    def _filter_activity_log(
+        self, entries: List[Dict[str, Any]], since: str
+    ) -> List[Dict[str, Any]]:
+        if not since:
+            return entries
+        filtered = []
+        for entry in entries:
+            created_at = entry.get("createdAt", "")
+            if created_at and created_at > since:
+                filtered.append(entry)
+        return filtered
+
+    def _write_stream_event(
+        self, handler: BaseHTTPRequestHandler, event: str, payload: Dict[str, Any]
+    ) -> None:
+        data = json.dumps(payload, ensure_ascii=True)
+        message = f"event: {event}\ndata: {data}\n\n"
+        handler.wfile.write(message.encode("utf-8"))
+        handler.wfile.flush()
+
+    def _write_stream_comment(self, handler: BaseHTTPRequestHandler, comment: str) -> None:
+        handler.wfile.write(f": {comment}\n\n".encode("utf-8"))
+        handler.wfile.flush()
+
+    def _write_stream_error(self, handler: BaseHTTPRequestHandler, message: str) -> None:
+        handler.send_response(400)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(json.dumps({"ok": False, "error": message}).encode("utf-8"))
+
+    def _first_query_value(self, query: Dict[str, List[str]], key: str) -> str:
+        values = query.get(key, [])
+        if not values:
+            return ""
+        return values[0]
 
     def _get_status_message(self, event_data: TaskStatusUpdateEvent) -> Any:
         getter = getattr(a2a, "get_message_from_status_update", None)

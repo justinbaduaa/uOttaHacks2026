@@ -97,6 +97,7 @@ Authorization: Bearer <jwt-token>
 
 - `POST /files/presign` - Get presigned URL for file upload
 - `POST /files/complete` - Complete file upload and attach to node
+- `POST /files/presign-download` - Get presigned URL for file download
 
 ## Response Format
 

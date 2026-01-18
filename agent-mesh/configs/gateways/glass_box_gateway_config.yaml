@@ -53,3 +53,4 @@ apps:
 
       artifact_upload_mode: "${GLASSBOX_ARTIFACT_UPLOAD_MODE, s3}"
       approval_poll_interval_seconds: ${GLASSBOX_APPROVAL_POLL_INTERVAL_SECONDS, 5}
+      stream_poll_interval_seconds: ${GLASSBOX_STREAM_POLL_INTERVAL_SECONDS, 3}

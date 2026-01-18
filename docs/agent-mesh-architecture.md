@@ -54,7 +54,7 @@
    - Uploads artifacts to S3 via `POST /files/presign` -> upload -> `POST /files/complete`.
    - Updates node `evidence`, `outputs`, `status`, and `activityLog`.
 7. **UI receives streaming updates**:
-   - Backend re-emits gateway status updates via SSE to the UI.
+   - Gateway serves SSE stream of node `activityLog` entries.
 
 ## Evidence + Artifact Strategy
 - Agents use built-in artifact tools (`/api/artifacts/create`, `list`, `load`, `signal_return`).
@@ -84,6 +84,12 @@ When a node input includes `{ type: "node" }`:
 - Gateway polls pending approvals and applies approved actions.
 - Applied approvals are marked `status=applied` for traceability.
 
+## Subnode Response Behavior
+- Agents propose subnodes via `glassbox_action` with `action="propose_subnode"`.
+- Gateway creates the child node with `parentNodeId` set to the current node.
+- Child nodes inherit approval mode and can be assigned to an agent or human.
+- The parent node receives a log entry noting the new subnode creation.
+
 ## Auth Strategy (v1)
 - UI uses Cognito JWT to authenticate with backend.
 - Gateway uses `backend_auth_mode`:
@@ -97,6 +103,11 @@ When a node input includes `{ type: "node" }`:
 3. Gateway uploads artifact content to S3 using the presigned URL.
 4. Gateway calls `POST /files/complete` to attach the file to node outputs/evidence.
 
+## S3 Download Flow (Gateway)
+1. When a node input is a file item, the gateway calls `POST /files/presign-download`.
+2. Gateway downloads file bytes using the presigned URL.
+3. Gateway includes a `FilePart` in the A2A request so agents receive the file content.
+
 ## Structured Agent Actions (DataPart)
 Agents emit DataParts with:
 ```json
@@ -109,11 +120,19 @@ Agents emit DataParts with:
 ```
 The gateway is the only component that mutates backend state.
 
+## Yellowcake Tool
+- Agents can call the `yellowcake_extract` tool to fetch structured data from a URL.
+- The tool posts to `https://api.yellowcake.dev/v1/extract-stream` and returns the final `complete` payload.
+- Optional parameters allow throttling, login URLs, and authorized URL allowlists for compliance.
+
 ## Gateway HTTP API
 - `POST /execute`
   - Body: `{ "canvasId": "...", "nodeId": "...", "userToken": "Bearer ...", "approvalMode": "..." }`
   - Optional header: `X-Glassbox-Token` shared secret.
   - Response: `{ taskId, approvalMode }`
+- `GET /stream?canvasId=...&nodeId=...&since=...`
+  - SSE stream of `activityLog` entries.
+  - Uses gateway auth mode (service token or user token).
 
 ## Activity Log
 - Node field `activityLog[]` records status updates, actions, approvals, artifacts, and errors.
@@ -147,6 +166,7 @@ The gateway is the only component that mutates backend state.
 - `node_budget_max_depth`
 - `artifact_upload_mode`
 - `approval_poll_interval_seconds`
+- `stream_poll_interval_seconds`
 
 ## Next Build Steps
 - Add SSE/WebSocket streaming from backend to UI.

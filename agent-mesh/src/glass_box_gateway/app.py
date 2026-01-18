@@ -112,6 +112,13 @@ class GlassBoxGatewayGatewayApp(BaseGatewayApp):
             "default": 5,
             "description": "Polling interval in seconds for approval resolution.",
         },
+        {
+            "name": "stream_poll_interval_seconds",
+            "required": False,
+            "type": "integer",
+            "default": 3,
+            "description": "Polling interval in seconds for streaming activity logs.",
+        },
     ]
 
     def __init__(self, app_info: Dict[str, Any], **kwargs):

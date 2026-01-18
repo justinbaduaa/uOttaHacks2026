@@ -61,6 +61,15 @@ apps:
           tool_type: builtin-group
         - tool_type: builtin-group
           group_name: "data_analysis"
+        - tool_type: python
+          component_module: "src.glass_box_tools.yellowcake"
+          function_name: "yellowcake_extract"
+          tool_name: "yellowcake_extract"
+          tool_description: "Extract structured data from a URL using Yellowcake (SSE)."
+          tool_config:
+            api_key: ${YELLOWCAKE_API_KEY}
+            base_url: ${YELLOWCAKE_API_BASE_URL, "https://api.yellowcake.dev/v1/extract-stream"}
+            timeout_seconds: ${YELLOWCAKE_TIMEOUT_SECONDS, 900}
 
       agent_card:
         description: "The Orchestrator component. It manages tasks and coordinates multi-agent workflows."
