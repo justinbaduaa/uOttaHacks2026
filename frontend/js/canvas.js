@@ -1069,6 +1069,9 @@ const Canvas = {
       this.closeCreateCanvas();
       return;
     }
+    if (this.state.isJoiningCanvas) {
+      this.closeJoinCanvas();
+    }
     this.state.isCreatingCanvas = true;
     this.canvasCreateForm.classList.add('is-open');
     this.canvasCreateError.textContent = '';
