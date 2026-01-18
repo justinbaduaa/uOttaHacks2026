@@ -302,3 +302,14 @@ ipcMain.handle("api-update-node", async (event, { token, nodeId, payload }) => {
   }
   return apiRequest({ path: `/nodes/${nodeId}`, method: "PATCH", token, body });
 });
+
+ipcMain.handle("api-delete-node", async (event, { token, nodeId, canvasId }) => {
+  if (!nodeId) {
+    throw new Error("Missing nodeId");
+  }
+  if (!canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  const params = new URLSearchParams({ canvasId });
+  return apiRequest({ path: `/nodes/${nodeId}?${params.toString()}`, method: "DELETE", token });
+});

@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('glassBox', {
     listNodes: (token, canvasId) => ipcRenderer.invoke('api-list-nodes', { token, canvasId }),
     createNode: (token, payload) => ipcRenderer.invoke('api-create-node', { token, payload }),
     updateNode: (token, nodeId, payload) => ipcRenderer.invoke('api-update-node', { token, nodeId, payload }),
+    deleteNode: (token, nodeId, canvasId) => ipcRenderer.invoke('api-delete-node', { token, nodeId, canvasId }),
   },
 });

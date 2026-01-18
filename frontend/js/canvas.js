@@ -87,6 +87,14 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
+  deleteNode(nodeId, canvasId) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.deleteNode) {
+      return window.glassBox.api.deleteNode(token, nodeId, canvasId);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
   listNodes(canvasId) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.listNodes) {
@@ -109,6 +117,14 @@ const Canvas = {
   isNodeCreateVisible: false,
   isNodeFieldEditing: false,
   activeEditableField: null,
+  nodeDeletePopover: null,
+  nodeDeleteConfirm: null,
+  nodeDeleteError: null,
+  nodeDeleteLabel: null,
+  pendingNodeDeleteId: null,
+  isNodeDeleteVisible: false,
+  canvasToast: null,
+  canvasToastTimeout: null,
   state: {
     canvases: [],
     selectedCanvasId: null,
@@ -121,6 +137,7 @@ const Canvas = {
     createCanvasError: null,
     canvasesError: null,
     isNodeCreateSubmitting: false,
+    isNodeDeleteSubmitting: false,
   },
   isDragging: false,
   isPanning: false,
@@ -149,6 +166,11 @@ const Canvas = {
     this.nodeCreateConfirm = document.getElementById('nodeCreateConfirm');
     this.nodeCreateError = document.getElementById('nodeCreateError');
     this.nodeCreateActionLabel = this.nodeCreateConfirm?.querySelector('.node-create-action-label');
+    this.nodeDeletePopover = document.getElementById('nodeDeletePopover');
+    this.nodeDeleteConfirm = document.getElementById('nodeDeleteConfirm');
+    this.nodeDeleteError = document.getElementById('nodeDeleteError');
+    this.nodeDeleteLabel = document.getElementById('nodeDeleteLabel');
+    this.canvasToast = document.getElementById('canvasToast');
 
     this.setupEventListeners();
     this.updateProfile();
@@ -195,6 +217,7 @@ const Canvas = {
     this.breadcrumb.addEventListener('click', (e) => {
       const item = e.target.closest('.breadcrumb-item');
       if (item) {
+        this.hideNodeDeletePopover();
         const id = item.dataset.id;
         if (id === 'root') {
           this.navigateToRoot();
@@ -203,14 +226,7 @@ const Canvas = {
           const index = this.currentPath.findIndex(n => n.id === id);
           if (index !== -1) {
             this.currentPath = this.currentPath.slice(0, index + 1);
-            const node = this.currentPath[index];
-            const children = this.getChildNodes(node.id);
-            if (children.length > 0) {
-              this.renderNodes(children);
-            } else {
-              this.renderNodes([node]);
-            }
-            this.updateBreadcrumb();
+            this.refreshCurrentView();
           }
         }
       }
@@ -262,6 +278,13 @@ const Canvas = {
       });
     }
 
+    if (this.nodeDeleteConfirm) {
+      this.nodeDeleteConfirm.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.confirmNodeDelete();
+      });
+    }
+
     document.addEventListener('click', (e) => {
       if (!this.isNodeCreateVisible || !this.nodeCreatePopover) return;
       if (this.state.isNodeCreateSubmitting) return;
@@ -271,9 +294,21 @@ const Canvas = {
       this.hideNodeCreatePopover(true);
     });
 
+    document.addEventListener('click', (e) => {
+      if (!this.isNodeDeleteVisible || !this.nodeDeletePopover) return;
+      if (this.state.isNodeDeleteSubmitting) return;
+      if (this.nodeDeletePopover.contains(e.target)) {
+        return;
+      }
+      this.hideNodeDeletePopover();
+    });
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isNodeCreateVisible && !this.state.isNodeCreateSubmitting) {
         this.hideNodeCreatePopover();
+      }
+      if (e.key === 'Escape' && this.isNodeDeleteVisible && !this.state.isNodeDeleteSubmitting) {
+        this.hideNodeDeletePopover();
       }
     });
   },
@@ -290,6 +325,8 @@ const Canvas = {
     if (e.target.closest('.glass-node') || e.target.closest('.node-create-popover')) {
       return;
     }
+
+    this.hideNodeDeletePopover(true);
 
     const rect = this.container.getBoundingClientRect();
     const margin = 90;
@@ -339,6 +376,62 @@ const Canvas = {
     }
   },
 
+  handleNodeContextMenu(event, nodeData) {
+    if (!nodeData || this.state.isNodeDeleteSubmitting) {
+      return;
+    }
+    if (event.target.closest('.node-editable')) {
+      return;
+    }
+    if (this.isNodeFieldEditing) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = this.container.getBoundingClientRect();
+    const margin = 70;
+    const rawX = event.clientX - rect.left;
+    const rawY = event.clientY - rect.top;
+    const maxX = Math.max(margin, rect.width - margin);
+    const maxY = Math.max(margin, rect.height - margin);
+    const x = Math.min(Math.max(rawX, margin), maxX);
+    const y = Math.min(Math.max(rawY, margin), maxY);
+
+    this.pendingNodeDeleteId = nodeData.id;
+    this.showNodeDeletePopover(x, y, nodeData);
+  },
+
+  showNodeDeletePopover(x, y, nodeData) {
+    if (!this.nodeDeletePopover) return;
+    this.hideNodeCreatePopover(true);
+    this.nodeDeletePopover.style.left = `${x}px`;
+    this.nodeDeletePopover.style.top = `${y}px`;
+    if (this.nodeDeleteLabel) {
+      const name = nodeData?.name ? `"${nodeData.name}"` : 'this task';
+      this.nodeDeleteLabel.textContent = `Delete ${name}?`;
+    }
+    if (this.nodeDeleteError) {
+      this.nodeDeleteError.textContent = '';
+    }
+    this.nodeDeletePopover.classList.add('is-visible');
+    this.nodeDeletePopover.setAttribute('aria-hidden', 'false');
+    this.isNodeDeleteVisible = true;
+  },
+
+  hideNodeDeletePopover(force = false) {
+    if (!this.nodeDeletePopover) return;
+    if (!force && this.state.isNodeDeleteSubmitting) {
+      return;
+    }
+    this.nodeDeletePopover.classList.remove('is-visible');
+    this.nodeDeletePopover.setAttribute('aria-hidden', 'true');
+    this.isNodeDeleteVisible = false;
+    this.pendingNodeDeleteId = null;
+    if (this.nodeDeleteError) {
+      this.nodeDeleteError.textContent = '';
+    }
+  },
+
   async submitCreateNode() {
     if (!this.nodeCreateConfirm || this.state.isNodeCreateSubmitting) {
       return;
@@ -357,8 +450,8 @@ const Canvas = {
     const payload = {
       canvasId: this.state.selectedCanvasId,
       parentNodeId: parentNodeId || 'ROOT',
-      title: 'enter text here',
-      description: 'enter text here',
+      title: 'Title',
+      description: 'Description',
       inputs: [],
       outputs: [],
       evidence: { notes: [], files: [] },
@@ -394,9 +487,56 @@ const Canvas = {
     }
   },
 
+  async confirmNodeDelete() {
+    if (!this.pendingNodeDeleteId || !this.state.selectedCanvasId) {
+      return;
+    }
+    if (this.state.isNodeDeleteSubmitting) {
+      return;
+    }
+    const nodeId = this.pendingNodeDeleteId;
+    const subtreeIds = this.collectSubtreeNodeIds(nodeId);
+    if (subtreeIds.length === 0) {
+      this.hideNodeDeletePopover(true);
+      return;
+    }
+
+    const nodesSnapshot = this.state.nodes.slice();
+    const pathSnapshot = this.currentPath.map((node) => node.id);
+
+    this.state.isNodeDeleteSubmitting = true;
+    if (this.nodeDeleteConfirm) {
+      this.nodeDeleteConfirm.disabled = true;
+    }
+    if (this.nodeDeleteError) {
+      this.nodeDeleteError.textContent = '';
+    }
+
+    this.removeNodesFromState(subtreeIds);
+    this.hideNodeDeletePopover(true);
+
+    try {
+      await Api.deleteNode(nodeId, this.state.selectedCanvasId);
+    } catch (error) {
+      console.error('[Canvas] Failed to delete node', error);
+      this.state.nodes = nodesSnapshot;
+      this.buildNodeIndex();
+      this.restorePathFromIds(pathSnapshot);
+      this.refreshCurrentView();
+      this.showCanvasToast(error.message || 'Failed to delete task.', 'error');
+    } finally {
+      this.state.isNodeDeleteSubmitting = false;
+      if (this.nodeDeleteConfirm) {
+        this.nodeDeleteConfirm.disabled = false;
+      }
+      this.pendingNodeDeleteId = null;
+    }
+  },
+
   refreshCurrentView() {
     if (this.currentPath.length === 0) {
       this.renderNodes(this.getRootNodes());
+      this.updateBreadcrumb();
       return;
     }
 
@@ -404,6 +544,7 @@ const Canvas = {
     const canonicalNode = currentNodeId ? this.getNode(currentNodeId) : null;
     if (!canonicalNode) {
       this.renderNodes([]);
+      this.updateBreadcrumb();
       return;
     }
 
@@ -411,8 +552,9 @@ const Canvas = {
     if (children.length > 0) {
       this.renderNodes(children);
     } else {
-      this.renderNodes([canonicalNode]);
+      this.renderNodes([]);
     }
+    this.updateBreadcrumb();
   },
 
   renderSidebar() {
@@ -490,6 +632,7 @@ const Canvas = {
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
     this.hideNodeCreatePopover();
+    this.hideNodeDeletePopover();
     this.renderSidebar();
     this.updateBreadcrumb();
     await this.loadNodesForCanvas(canvasId);
@@ -509,7 +652,7 @@ const Canvas = {
         .map(node => this.normalizeNodeFromApi(node));
       this.state.nodes = normalized;
       this.buildNodeIndex();
-      this.renderNodes(this.getRootNodes());
+      this.refreshCurrentView();
     } catch (error) {
       console.error('[Canvas] Failed to load nodes', error);
       this.state.nodes = [];
@@ -681,6 +824,10 @@ const Canvas = {
       }
       event.stopPropagation();
       this.navigateIntoNode(nodeData);
+    });
+
+    element.addEventListener('contextmenu', (event) => {
+      this.handleNodeContextMenu(event, nodeData);
     });
 
     return { element, data: nodeData, x, y };
@@ -872,6 +1019,78 @@ const Canvas = {
     });
   },
 
+  collectSubtreeNodeIds(nodeId) {
+    if (!nodeId || !this.state.nodesById[nodeId]) {
+      return [];
+    }
+    const ids = [];
+    const stack = [nodeId];
+    const seen = new Set();
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (seen.has(currentId)) {
+        continue;
+      }
+      seen.add(currentId);
+      if (!this.state.nodesById[currentId]) {
+        continue;
+      }
+      ids.push(currentId);
+      const children = this.getChildNodes(currentId) || [];
+      children.forEach((child) => stack.push(child.id));
+    }
+    return ids;
+  },
+
+  removeNodesFromState(nodeIds) {
+    if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
+      return;
+    }
+    const removalSet = new Set(nodeIds);
+    this.state.nodes = this.state.nodes.filter((node) => !removalSet.has(node.id));
+    this.buildNodeIndex();
+    this.refreshCurrentView();
+  },
+
+  restorePathFromIds(pathIds) {
+    if (!Array.isArray(pathIds) || pathIds.length === 0) {
+      this.currentPath = [];
+      return;
+    }
+    const newPath = [];
+    pathIds.forEach((id) => {
+      const node = this.getNode(id);
+      if (node) {
+        newPath.push(node);
+      }
+    });
+    this.currentPath = newPath;
+  },
+
+  showCanvasToast(message, variant = 'neutral') {
+    if (!this.canvasToast) return;
+    this.canvasToast.textContent = message;
+    this.canvasToast.classList.remove('is-error');
+    if (variant === 'error') {
+      this.canvasToast.classList.add('is-error');
+    }
+    this.canvasToast.classList.add('is-visible');
+    if (this.canvasToastTimeout) {
+      clearTimeout(this.canvasToastTimeout);
+    }
+    this.canvasToastTimeout = setTimeout(() => this.hideCanvasToast(), 3200);
+  },
+
+  hideCanvasToast() {
+    if (!this.canvasToast) return;
+    this.canvasToast.classList.remove('is-visible');
+    this.canvasToast.classList.remove('is-error');
+    if (this.canvasToastTimeout) {
+      clearTimeout(this.canvasToastTimeout);
+      this.canvasToastTimeout = null;
+    }
+  },
+
   placeCaretAtEnd(element) {
     if (!element) return;
     const range = document.createRange();
@@ -885,6 +1104,7 @@ const Canvas = {
 
   startDrag(e, element, currentX, currentY) {
     this.hideNodeCreatePopover();
+    this.hideNodeDeletePopover();
     this.isDragging = true;
     this.selectedNode = this.nodes.find(n => n.element === element);
     
@@ -919,6 +1139,7 @@ const Canvas = {
 
   startPan(e) {
     this.hideNodeCreatePopover();
+    this.hideNodeDeletePopover();
     this.isPanning = true;
     this.panStart = {
       x: e.clientX - this.canvasOffset.x,
@@ -980,31 +1201,24 @@ const Canvas = {
 
   navigateIntoNode(nodeData) {
     this.hideNodeCreatePopover();
-    const children = this.getChildNodes(nodeData.id);
-    
+    this.hideNodeDeletePopover();
     this.currentPath.push(nodeData);
     
-    if (children.length > 0) {
-      this.renderNodes(children);
-    } else {
-      this.renderNodes([nodeData]);
-    }
-
     // Reset view
     this.canvasOffset = { x: 0, y: 0 };
     this.scale = 1;
     this.updateCanvasTransform();
-    this.updateBreadcrumb();
+    this.refreshCurrentView();
   },
 
   navigateToRoot() {
     this.hideNodeCreatePopover();
+    this.hideNodeDeletePopover();
     this.currentPath = [];
-    this.renderNodes(this.getRootNodes());
     this.canvasOffset = { x: 0, y: 0 };
     this.scale = 1;
     this.updateCanvasTransform();
-    this.updateBreadcrumb();
+    this.refreshCurrentView();
   },
 
   updateBreadcrumb() {

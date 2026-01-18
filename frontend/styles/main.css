@@ -715,6 +715,101 @@ html, body {
   text-align: center;
 }
 
+.node-delete-popover {
+  position: absolute;
+  min-width: 220px;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid rgba(220, 53, 69, 0.2);
+  box-shadow: var(--shadow-card);
+  transform: translate(-50%, -50%) scale(0.94);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-base), transform var(--transition-base);
+  z-index: 7;
+}
+
+.node-delete-popover.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.node-delete-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.node-delete-subtitle {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-top: 2px;
+  margin-bottom: var(--space-3);
+}
+
+.node-delete-action {
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, #f87171, #ef4444);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(239, 68, 68, 0.35);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+
+.node-delete-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(239, 68, 68, 0.45);
+}
+
+.node-delete-action:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  box-shadow: var(--shadow-sm);
+}
+
+.node-delete-error {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: #b91c1c;
+  min-height: 14px;
+  text-align: center;
+}
+
+.canvas-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translate(-50%, 8px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-base), transform var(--transition-base);
+  z-index: 8;
+}
+
+.canvas-toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.canvas-toast.is-error {
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #991b1b;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
