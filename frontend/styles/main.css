@@ -406,7 +406,7 @@ body {
 }
 
 .canvas-action-form {
-  margin-top: var(--space-2);
+  /* margin-top: var(--space-2); - Moved to is-open state */
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -417,13 +417,16 @@ body {
   opacity: 0;
   overflow: hidden;
   transform: translateY(-4px);
-  transition: max-height 200ms ease, opacity 200ms ease, transform 200ms ease;
+  /* Added margin-top to transition */
+  transition: max-height 200ms ease, opacity 200ms ease, transform 200ms ease, margin-top 200ms ease;
+  margin-top: 0; /* Default to 0 to prevent gap when closed */
 }
 
 .canvas-action-form.is-open {
   max-height: 180px;
   opacity: 1;
   transform: translateY(0);
+  margin-top: var(--space-2); /* Apply margin only when open */
 }
 
 .canvas-action-input {
