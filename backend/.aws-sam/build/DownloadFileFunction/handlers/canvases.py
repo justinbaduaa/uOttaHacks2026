@@ -10,10 +10,11 @@ from lib.dynamodb import (
     find_canvas_by_join_code,
     get_canvas_table,
     list_canvases_for_user,
+    require_membership,
 )
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
-from lib.validation import parse_body, validate_canvas_id
+from lib.validation import normalize_evidence, parse_body, validate_canvas_id
 
 logger = get_logger(__name__)
 
@@ -196,3 +197,129 @@ def list_canvases(event, context):
     except Exception as e:
         logger.error(f"Error listing canvases: {str(e)}", exc_info=True)
         return internal_error_response("Failed to list canvases")
+
+
+def get_canvas_evidence(event, context):
+    """GET /canvases/{canvasId}/evidence - Get canvas-level evidence."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        canvas_id = (event.get("pathParameters") or {}).get("canvasId")
+        if not canvas_id:
+            return error_response(code="INVALID_REQUEST", message="canvasId is required")
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        table = get_canvas_table()
+        response = table.get_item(
+            Key={
+                "PK": f"CANVAS#{canvas_id}",
+                "SK": "META",
+            }
+        )
+        item = response.get("Item")
+        if not item:
+            return error_response(
+                code="NOT_FOUND",
+                message="Canvas not found",
+                status_code=404,
+            )
+
+        evidence, evidence_error = normalize_evidence(item.get("evidence"))
+        if evidence_error:
+            evidence = {"notes": [], "files": []}
+
+        return success_response({
+            "canvasId": canvas_id,
+            "evidence": evidence,
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting canvas evidence: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to get canvas evidence")
+
+
+def update_canvas_evidence(event, context):
+    """PATCH /canvases/{canvasId}/evidence - Update canvas-level evidence."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        canvas_id = (event.get("pathParameters") or {}).get("canvasId")
+        if not canvas_id:
+            return error_response(code="INVALID_REQUEST", message="canvasId is required")
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        body, parse_error = parse_body(event)
+        if parse_error:
+            return parse_error
+
+        evidence_payload = body.get("evidence")
+        if evidence_payload is None:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="evidence is required",
+            )
+
+        evidence, evidence_error = normalize_evidence(evidence_payload)
+        if evidence_error:
+            return error_response(code="INVALID_REQUEST", message=evidence_error)
+
+        table = get_canvas_table()
+        existing = table.get_item(
+            Key={
+                "PK": f"CANVAS#{canvas_id}",
+                "SK": "META",
+            }
+        )
+        if "Item" not in existing:
+            return error_response(
+                code="NOT_FOUND",
+                message="Canvas not found",
+                status_code=404,
+            )
+
+        now = datetime.utcnow().isoformat() + "Z"
+        response = table.update_item(
+            Key={
+                "PK": f"CANVAS#{canvas_id}",
+                "SK": "META",
+            },
+            UpdateExpression="SET evidence = :evidence, updatedAt = :now",
+            ExpressionAttributeValues={
+                ":evidence": evidence,
+                ":now": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+
+        updated_item = response.get("Attributes", {})
+        updated_evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+        if evidence_error:
+            updated_evidence = evidence
+
+        return success_response({
+            "canvasId": canvas_id,
+            "evidence": updated_evidence,
+            "updatedAt": updated_item.get("updatedAt") or now,
+        })
+
+    except Exception as e:
+        logger.error(f"Error updating canvas evidence: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to update canvas evidence")

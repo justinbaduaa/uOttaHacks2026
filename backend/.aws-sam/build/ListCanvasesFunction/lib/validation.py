@@ -147,10 +147,34 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
     if isinstance(notes, str):
         notes = [notes]
     if not isinstance(notes, list):
-        return None, "evidence.notes must be a string or array of strings"
-    for note in notes:
-        if not isinstance(note, str):
-            return None, "evidence.notes must contain only strings"
+        return None, "evidence.notes must be a string or array"
+    normalized_notes = []
+    for idx, note in enumerate(notes):
+        if isinstance(note, str):
+            normalized_notes.append({
+                "noteId": f"note-{idx}",
+                "text": note,
+                "createdAt": None,
+            })
+            continue
+        if not isinstance(note, dict):
+            return None, "evidence.notes items must be strings or objects"
+        text = note.get("text") or note.get("content")
+        if not text or not isinstance(text, str):
+            return None, "evidence.notes items must include text"
+        note_id = note.get("noteId") or note.get("id") or f"note-{idx}"
+        if note_id and not isinstance(note_id, str):
+            return None, "evidence.notes noteId must be a string"
+        created_at = note.get("createdAt") or note.get("timestamp")
+        if created_at:
+            valid, error_msg = validate_iso8601(created_at)
+            if not valid:
+                return None, error_msg
+        normalized_notes.append({
+            "noteId": note_id,
+            "text": text,
+            "createdAt": created_at,
+        })
 
     if not isinstance(files, list):
         return None, "evidence.files must be an array"
@@ -159,4 +183,4 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
         if not valid:
             return None, f"evidence.files: {error}"
 
-    return {"notes": notes, "files": files}, None
+    return {"notes": normalized_notes, "files": files}, None

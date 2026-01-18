@@ -114,6 +114,59 @@ def list_canvases_for_user(user_sub: str) -> List[Dict[str, Any]]:
         return []
 
 
+def upsert_canvas_presence(
+    canvas_id: str,
+    user_sub: str,
+    display_name: Optional[str] = None,
+    initial: Optional[str] = None,
+    last_active_at: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Upsert a presence record for a user in a canvas."""
+    table = get_canvas_table()
+    try:
+        now = last_active_at or datetime.utcnow().isoformat() + "Z"
+        item = {
+            "PK": f"CANVAS#{canvas_id}",
+            "SK": f"PRESENCE#{user_sub}",
+            "userSub": user_sub,
+            "displayName": display_name,
+            "initial": initial,
+            "lastActiveAt": now,
+        }
+        table.put_item(Item=item)
+        return item
+    except Exception:
+        return None
+
+
+def list_canvas_presence(
+    canvas_id: str,
+    active_since: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """List active presence records for a canvas."""
+    table = get_canvas_table()
+    try:
+        response = table.query(
+            KeyConditionExpression=Key("PK").eq(f"CANVAS#{canvas_id}")
+            & Key("SK").begins_with("PRESENCE#"),
+        )
+        items = response.get("Items", [])
+        active_users = []
+        for item in items:
+            last_active_at = item.get("lastActiveAt") or ""
+            if active_since and last_active_at and last_active_at < active_since:
+                continue
+            active_users.append({
+                "userId": item.get("userSub") or item.get("SK", "").replace("PRESENCE#", ""),
+                "displayName": item.get("displayName"),
+                "initial": item.get("initial"),
+                "lastActiveAt": last_active_at,
+            })
+        return active_users
+    except Exception:
+        return []
+
+
 def find_canvas_by_join_code(join_code: str) -> Optional[Dict[str, Any]]:
     """
     Find canvas by join code.

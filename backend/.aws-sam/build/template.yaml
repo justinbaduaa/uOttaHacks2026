@@ -217,6 +217,46 @@ Resources:
             Ref: CanvasTable
     Metadata:
       SamResourceId: ListCanvasesFunction
+  GetCanvasEvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxGetCanvasEvidence
+      CodeUri: GetCanvasEvidenceFunction
+      Handler: handlers.canvases.get_canvas_evidence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: get
+            Path: /canvases/{canvasId}/evidence
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: GetCanvasEvidenceFunction
+  UpdateCanvasEvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxUpdateCanvasEvidence
+      CodeUri: UpdateCanvasEvidenceFunction
+      Handler: handlers.canvases.update_canvas_evidence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: patch
+            Path: /canvases/{canvasId}/evidence
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: UpdateCanvasEvidenceFunction
   GetNodesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -235,7 +275,7 @@ Resources:
       - DynamoDBReadPolicy:
           TableName:
             Ref: NodesTable
-      - DynamoDBReadPolicy:
+      - DynamoDBCrudPolicy:
           TableName:
             Ref: CanvasTable
     Metadata:
@@ -361,7 +401,7 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: NodesTable
-      - DynamoDBReadPolicy:
+      - DynamoDBCrudPolicy:
           TableName:
             Ref: CanvasTable
     Metadata:
@@ -392,6 +432,26 @@ Resources:
             Ref: FilesBucket
     Metadata:
       SamResourceId: DownloadFileFunction
+  LeavePresenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxLeavePresence
+      CodeUri: LeavePresenceFunction
+      Handler: handlers.presence.leave_presence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: post
+            Path: /presence/leave
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: LeavePresenceFunction
 Outputs:
   ApiUrl:
     Description: API Gateway HTTP API URL

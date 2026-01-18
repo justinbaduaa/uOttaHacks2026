@@ -139,48 +139,79 @@
           </div>
         </header>
 
-        <!-- Canvas Container -->
-        <div class="canvas-container" id="canvasContainer">
-          <div class="canvas" id="canvas">
-            <!-- Nodes will be rendered here -->
-          </div>
-          <div class="canvas-loading" id="canvasLoading" hidden>
-            <div class="spinner"></div>
-            <span>Loading nodes...</span>
-          </div>
-          <div
-            class="node-create-popover"
-            id="nodeCreatePopover"
-            aria-hidden="true"
-          >
-            <button
-              class="node-create-action"
-              id="nodeCreateConfirm"
-              type="button"
-            >
-              <span class="node-create-action-label">Create new task</span>
-            </button>
-            <div class="node-create-error" id="nodeCreateError"></div>
-          </div>
-          <div
-            class="node-delete-popover"
-            id="nodeDeletePopover"
-            aria-hidden="true"
-          >
-            <div class="node-delete-label" id="nodeDeleteLabel">Delete?</div>
-            <div class="node-delete-subtitle">
-              This removes the node and any subtasks.
+        <div class="main-body">
+          <!-- Canvas Container -->
+          <div class="canvas-container" id="canvasContainer">
+            <div class="canvas" id="canvas">
+              <!-- Nodes will be rendered here -->
             </div>
-            <button
-              class="node-delete-action"
-              id="nodeDeleteConfirm"
-              type="button"
+            <div class="canvas-loading" id="canvasLoading" hidden>
+              <div class="spinner"></div>
+              <span>Loading nodes...</span>
+            </div>
+            <div
+              class="node-create-popover"
+              id="nodeCreatePopover"
+              aria-hidden="true"
             >
-              Delete
-            </button>
-            <div class="node-delete-error" id="nodeDeleteError"></div>
+              <button
+                class="node-create-action"
+                id="nodeCreateConfirm"
+                type="button"
+              >
+                <span class="node-create-action-label">Create new task</span>
+              </button>
+              <div class="node-create-error" id="nodeCreateError"></div>
+            </div>
+            <div
+              class="node-delete-popover"
+              id="nodeDeletePopover"
+              aria-hidden="true"
+            >
+              <div class="node-delete-label" id="nodeDeleteLabel">Delete?</div>
+              <div class="node-delete-subtitle">
+                This removes the node and any subtasks.
+              </div>
+              <button
+                class="node-delete-action"
+                id="nodeDeleteConfirm"
+                type="button"
+              >
+                Delete
+              </button>
+              <div class="node-delete-error" id="nodeDeleteError"></div>
+            </div>
+            <div class="canvas-toast" id="canvasToast" aria-live="polite"></div>
           </div>
-          <div class="canvas-toast" id="canvasToast" aria-live="polite"></div>
+
+          <!-- Evidence Sidebar -->
+          <aside class="evidence-sidebar" id="evidenceSidebar">
+            <div class="evidence-header">
+              <div class="evidence-title">Evidence</div>
+              <div class="evidence-subtitle" id="evidenceSubtitle">Canvas log</div>
+            </div>
+            <div class="evidence-input">
+              <div class="evidence-input-label">Add note</div>
+              <div class="evidence-input-row">
+                <input
+                  type="text"
+                  id="evidenceNoteInput"
+                  class="evidence-note-input"
+                  placeholder="Write a note..."
+                  maxlength="180"
+                />
+                <button class="evidence-note-submit" id="evidenceNoteSubmit">Add</button>
+              </div>
+            </div>
+            <div class="drop-zone evidence-drop-zone" id="evidenceDropZone">
+              <i data-lucide="upload-cloud"></i>
+              <span>Drop files here</span>
+            </div>
+            <div class="evidence-content">
+              <div class="evidence-empty" id="evidenceEmpty">No evidence yet.</div>
+              <div class="evidence-list" id="evidenceList"></div>
+            </div>
+          </aside>
         </div>
       </main>
     </div>

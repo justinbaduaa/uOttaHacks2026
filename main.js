@@ -273,6 +273,25 @@ ipcMain.handle("api-list-canvases", async (event, token) => {
   return apiRequest({ path: "/canvases", method: "GET", token });
 });
 
+ipcMain.handle("api-get-canvas-evidence", async (event, { token, canvasId }) => {
+  if (!canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  return apiRequest({ path: `/canvases/${canvasId}/evidence`, method: "GET", token });
+});
+
+ipcMain.handle("api-update-canvas-evidence", async (event, { token, canvasId, evidence }) => {
+  if (!canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  return apiRequest({
+    path: `/canvases/${canvasId}/evidence`,
+    method: "PATCH",
+    token,
+    body: { evidence },
+  });
+});
+
 ipcMain.handle("api-create-canvas", async (event, { token, name }) => {
   return apiRequest({ path: "/canvases", method: "POST", token, body: { name } });
 });
@@ -363,6 +382,7 @@ ipcMain.handle("api-presign-file", async (event, { token, payload }) => {
     slot: payload?.slot,
     filename: payload?.filename,
     contentType: payload?.contentType,
+    scope: payload?.scope,
   };
   return apiRequest({ path: "/files/presign", method: "POST", token, body });
 });
@@ -376,6 +396,7 @@ ipcMain.handle("api-complete-file", async (event, { token, payload }) => {
     s3Key: payload?.s3Key,
     filename: payload?.filename,
     contentType: payload?.contentType,
+    scope: payload?.scope,
   };
   return apiRequest({ path: "/files/complete", method: "POST", token, body });
 });
@@ -386,8 +407,16 @@ ipcMain.handle("api-download-file", async (event, { token, payload }) => {
     nodeId: payload?.nodeId,
     fileId: payload?.fileId,
     s3Key: payload?.s3Key,
+    scope: payload?.scope,
   };
   return apiRequest({ path: "/files/download", method: "POST", token, body });
+});
+
+ipcMain.handle("api-leave-presence", async (event, { token, canvasId }) => {
+  if (!canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  return apiRequest({ path: "/presence/leave", method: "POST", token, body: { canvasId } });
 });
 
 ipcMain.handle("api-upload-s3", async (event, { url, contentType, data }) => {
