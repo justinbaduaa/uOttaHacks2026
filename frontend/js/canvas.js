@@ -262,9 +262,15 @@ const Canvas = {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.pollInFlight = false; // Reset flight status
   },
 
   async poll() {
+    // Strict check: if editing, do absolutely nothing.
+    if (this.isNodeFieldEditing) {
+      return;
+    }
+
     const canvasId = this.state.selectedCanvasId;
     if (!canvasId || this.state.isLoadingNodes || this.pollInFlight) {
       return;
@@ -948,7 +954,10 @@ const Canvas = {
   closeJoinCanvas() {
     this.state.isJoiningCanvas = false;
     if (this.canvasJoinForm) this.canvasJoinForm.classList.remove('is-open');
-    if (this.canvasJoinError) this.canvasJoinError.textContent = '';
+    if (this.canvasJoinError) {
+      this.canvasJoinError.textContent = '';
+      this.canvasJoinError.classList.remove('text-success');
+    }
   },
 
   async submitJoinCanvas() {
@@ -959,7 +968,10 @@ const Canvas = {
     }
 
     if (this.canvasJoinSubmit) this.canvasJoinSubmit.disabled = true;
-    if (this.canvasJoinError) this.canvasJoinError.textContent = 'Joining...';
+    if (this.canvasJoinError) {
+      this.canvasJoinError.textContent = 'Joining...';
+      this.canvasJoinError.classList.add('text-success');
+    }
 
     try {
       const joined = await Api.joinCanvas(rawCode);
@@ -982,6 +994,7 @@ const Canvas = {
     } catch (error) {
       const message = String(error.message || 'Failed to join canvas.');
       if (this.canvasJoinError) {
+        this.canvasJoinError.classList.remove('text-success');
         if (message.toLowerCase().includes('not found')) {
           this.canvasJoinError.textContent = 'Invalid code.';
         } else if (message.toLowerCase().includes('already')) {
@@ -1389,7 +1402,7 @@ const Canvas = {
     // Drag listeners (Target node-content but exclude interactive elements)
     element.addEventListener('mousedown', (e) => {
         if (
-            e.target.closest('.node-editable') || 
+            (e.target.closest('.node-editable') && e.target.isContentEditable) || 
             e.target.closest('button') || 
             e.target.closest('.drop-zone') ||
             this.isNodeFieldEditing
@@ -1437,6 +1450,7 @@ const Canvas = {
         field: 'title',
         placeholder: 'Name this task',
         allowEmpty: false,
+        defaultValue: 'Title',
         value: nodeData.name || '',
       },
       {
@@ -1444,22 +1458,33 @@ const Canvas = {
         field: 'description',
         placeholder: 'Describe what success looks like',
         allowEmpty: true,
+        defaultValue: 'Description',
         value: nodeData.goal || '',
       },
     ];
 
-    config.forEach(({ el, field, placeholder, allowEmpty, value }) => {
+    config.forEach(({ el, field, placeholder, allowEmpty, defaultValue, value }) => {
       if (!el) return;
-      el.contentEditable = 'true';
+      el.contentEditable = 'false'; // Default to false
       el.spellcheck = true;
       el.classList.add('node-editable');
       el.dataset.nodeId = nodeData.id;
       el.dataset.field = field;
       el.dataset.allowEmpty = allowEmpty ? 'true' : 'false';
       el.setAttribute('data-placeholder', placeholder);
+      if (defaultValue) {
+        el.dataset.defaultValue = defaultValue;
+      }
       el.textContent = value;
       el.dataset.originalValue = this.getNodeFieldTextValue(el);
       this.updateEditablePlaceholderState(el);
+
+      // Enable editing on double click
+      el.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          el.contentEditable = 'true';
+          el.focus();
+      });
 
       el.addEventListener('focus', () => this.handleNodeFieldFocus(el));
       el.addEventListener('input', () => this.handleNodeFieldInput(el));
@@ -1482,12 +1507,25 @@ const Canvas = {
   handleNodeFieldFocus(element) {
     if (!element) return;
     this.isNodeFieldEditing = true;
+    this.stopPolling(); // KILL polling completely while editing
     this.activeEditableField = element;
     element.classList.remove('has-error');
     element.classList.remove('is-saving');
     element.dataset.originalValue = this.getNodeFieldTextValue(element);
+    
+    // Clear default value on focus to act like a placeholder
+    const defaultValue = element.dataset.defaultValue;
+    const currentValue = element.textContent.trim();
+    
+    // Only clear if it matches default EXACTLY
+    if (defaultValue && currentValue === defaultValue) {
+      element.textContent = '';
+      this.updateEditablePlaceholderState(element);
+    } else {
+       element.setAttribute('data-placeholder-visible', 'false');
+    }
+    
     this.hideNodeCreatePopover(true);
-    element.setAttribute('data-placeholder-visible', 'false');
     setTimeout(() => this.placeCaretAtEnd(element), 0);
   },
 
@@ -1518,9 +1556,23 @@ const Canvas = {
     if (!element) return;
     const originalValue = element.dataset.originalValue || '';
     const newValue = this.getNodeFieldTextValue(element);
+    
+    // Resume polling immediately
     this.isNodeFieldEditing = false;
     this.activeEditableField = null;
+    element.contentEditable = 'false'; 
+    this.startPolling();
+
     this.updateEditablePlaceholderState(element);
+    
+    // If empty and not allowed, OR if empty and has default value, revert to default/original
+    const defaultValue = element.dataset.defaultValue;
+    if (!newValue && defaultValue) {
+        element.textContent = defaultValue;
+        this.updateEditablePlaceholderState(element);
+        // Do not save "Title" or "Description" to server if it was just a revert
+        return; 
+    }
 
     if (newValue === originalValue) {
       element.textContent = originalValue;
@@ -1593,6 +1645,10 @@ const Canvas = {
   },
 
   applyNodeUpdates(nodeId, updates, nodeData) {
+    // Safety check: never apply updates to a node being edited
+    if (this.isNodeFieldEditing && this.activeEditableField && this.activeEditableField.dataset.nodeId === nodeId) {
+        return;
+    }
     if (nodeData && nodeData.id === nodeId) {
       Object.assign(nodeData, updates);
     }
