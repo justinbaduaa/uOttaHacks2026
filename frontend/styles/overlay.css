@@ -1,0 +1,113 @@
+/* Glass Box - Overlay Window */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    user-select: none;
+}
+
+#app {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    padding: 20px; /* Padding from screen edge */
+    box-sizing: border-box;
+}
+
+/* 
+   The Drop Zone Container
+   Initially small (anchor), expands on DragEnter 
+*/
+.drop-zone {
+    width: 60px;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.1),
+        0 2px 4px rgba(0, 0, 0, 0.05);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    cursor: default;
+    overflow: hidden;
+    position: relative;
+    /* Allow clicking through the empty space around it? 
+       Electron window ignores clicks on transparent areas if set up right, 
+       but we want the box itself to be interacive. */
+}
+
+/* Icon / Content */
+.icon {
+    width: 24px;
+    height: 24px;
+    color: #4B5563;
+    transition: all 0.3s ease;
+}
+
+.label {
+    opacity: 0;
+    height: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1F2937;
+    margin-top: 0;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+/* Hover / Anchor State */
+.drop-zone:hover {
+    background: rgba(255, 255, 255, 0.85);
+    transform: scale(1.05);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.15);
+}
+
+/* 
+   State: Dragging file over the window 
+   Typically triggered by JS adding a class when drag enters body 
+*/
+.drop-zone.active {
+    width: 280px;
+    height: 180px;
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #22A47F;
+    box-shadow: 
+        0 0 0 4px rgba(34, 164, 127, 0.15),
+        0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.drop-zone.active .icon {
+    width: 48px;
+    height: 48px;
+    color: #22A47F;
+    margin-bottom: 12px;
+}
+
+.drop-zone.active .label {
+    opacity: 1;
+    height: auto;
+    margin-top: 8px;
+}
+
+/* Pulse animation for active state to draw attention */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+
+.drop-zone.active {
+    animation: pulse 2s infinite ease-in-out;
+}

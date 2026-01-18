@@ -272,3 +272,55 @@ ipcMain.handle("api-list-nodes", async (event, { token, canvasId, updatedSince, 
   }
   return apiRequest({ path: `/nodes?${params.toString()}`, method: "GET", token });
 });
+
+ipcMain.handle("api-create-node", async (event, { token, payload }) => {
+  const body = {
+    canvasId: payload?.canvasId,
+    parentNodeId: payload?.parentNodeId || "ROOT",
+    title: payload?.title,
+    description: payload?.description,
+    inputs: payload?.inputs || [],
+    outputs: payload?.outputs || [],
+    evidence: payload?.evidence,
+  };
+  return apiRequest({ path: "/nodes", method: "POST", token, body });
+});
+
+ipcMain.handle("api-update-node", async (event, { token, nodeId, payload }) => {
+  if (!nodeId) {
+    throw new Error("Missing nodeId");
+  }
+  if (!payload?.canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  const body = {
+    canvasId: payload.canvasId,
+  };
+  if (payload.title !== undefined) {
+    body.title = payload.title;
+  }
+  if (payload.description !== undefined) {
+    body.description = payload.description;
+  }
+  if (payload.inputs !== undefined) {
+    body.inputs = payload.inputs;
+  }
+  if (payload.outputs !== undefined) {
+    body.outputs = payload.outputs;
+  }
+  if (payload.evidence !== undefined) {
+    body.evidence = payload.evidence;
+  }
+  return apiRequest({ path: `/nodes/${nodeId}`, method: "PATCH", token, body });
+});
+
+ipcMain.handle("api-delete-node", async (event, { token, nodeId, canvasId }) => {
+  if (!nodeId) {
+    throw new Error("Missing nodeId");
+  }
+  if (!canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  const params = new URLSearchParams({ canvasId });
+  return apiRequest({ path: `/nodes/${nodeId}?${params.toString()}`, method: "DELETE", token });
+});
