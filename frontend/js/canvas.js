@@ -735,9 +735,6 @@ const Canvas = {
     this.canvas.innerHTML = '';
 
     if (nodeDataArray.length === 0 && !this.state.isLoadingNodes) {
-      this.canvas.innerHTML = `
-        <div class="canvas-empty-state">No nodes yet. Create your first node.</div>
-      `;
       return;
     }
 
@@ -761,49 +758,127 @@ const Canvas = {
 
     element.style.transform = `translate(${x}px, ${y}px)`;
 
-    const evidenceCount = nodeData.evidence?.length || 0;
-    const statusLabel = this.getStatusLabel(nodeData.status);
-    const statusClass = this.getStatusClass(nodeData.status);
-    const createdLabel = nodeData.createdAt ? this.formatTimestamp(nodeData.createdAt) : '--';
+    const fileCount = nodeData.evidence?.length || 21;
+    const layerCount = this.getChildNodes(nodeData.id)?.length || 3;
 
     element.innerHTML = `
       <div class="node-content">
-        <h3 class="node-title">${this.escapeHtml(nodeData.name)}</h3>
-        <p class="node-description">${this.escapeHtml(nodeData.goal)}</p>
-        
-        <div class="node-footer">
-          <span class="status-badge ${statusClass}">${statusLabel}</span>
-          <div class="node-avatar" title="${this.escapeHtml(nodeData.author.name)}">
-            ${nodeData.author.initials}
-          </div>
+        <!-- Header with icon, title, expand button -->
+        <div class="node-header">
+          <span class="node-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </span>
+          <h3 class="node-title">${this.escapeHtml(nodeData.name || 'Untitled')}</h3>
+          <button class="node-expand-btn" aria-label="Expand output">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
         </div>
         
-        <div class="node-meta">
-          <div class="meta-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-            <span>${evidenceCount}</span>
-          </div>
-          <div class="meta-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span>${createdLabel}</span>
-          </div>
-          ${nodeData.status === 'complete' ? `
-            <div class="done-badge">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="20 6 9 17 4 12"/>
+        <!-- Description -->
+        <p class="node-description">${this.escapeHtml(nodeData.goal || 'Description')}</p>
+        
+        <!-- Notes Section -->
+        <div class="node-notes-section">
+          <span class="node-notes-label">Notes:</span>
+          <div class="node-notes-input" contenteditable="true" data-node-id="${nodeData.id}"></div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="node-actions">
+          <button class="action-btn folder">
+            <span class="action-btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10 4H4c-1.11 0-2 .89-2 2v12c0 1.097.903 2 2 2h16c1.097 0 2-.903 2-2V8c0-1.11-.9-2-2-2h-8l-2-2z"/>
               </svg>
-              <span>Done</span>
-            </div>
-          ` : ''}
+            </span>
+            Folder
+          </button>
+          <button class="action-btn file">
+            <span class="action-btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
+                <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/>
+              </svg>
+            </span>
+            File
+          </button>
+          <button class="action-btn ticket">
+            <span class="action-btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+            </span>
+            Ticket
+          </button>
+        </div>
+        
+        <!-- Stats Footer -->
+        <div class="node-stats-footer">
+          <div class="stat-item files">
+            <span class="stat-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+            </span>
+            <span>${fileCount}</span>
+          </div>
+          <div class="stat-item layers">
+            <span class="stat-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M2 12l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2"/>
+              </svg>
+            </span>
+            <span>${layerCount}</span>
+          </div>
+          <button class="chart-btn" aria-label="View stats">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="10" width="4" height="10" rx="1"/>
+              <rect x="10" y="4" width="4" height="16" rx="1"/>
+              <rect x="16" y="8" width="4" height="12" rx="1"/>
+            </svg>
+          </button>
+        </div>
+        
+        <!-- Output Section (expandable) -->
+        <div class="node-output">
+          <div class="node-output-header">
+            <span class="output-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </span>
+            <span class="output-title">Output</span>
+          </div>
+          <p class="node-output-description">Create filtered views that you can save and share with others</p>
+          <div class="node-output-actions">
+            <button class="output-open-btn">Open views</button>
+            <a class="output-learn-more">Learn more ›</a>
+          </div>
         </div>
       </div>
     `;
+
+    // Expand button toggle
+    const expandBtn = element.querySelector('.node-expand-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        element.classList.toggle('expanded');
+      });
+    }
 
     this.attachNodeEditing(element, nodeData);
 
