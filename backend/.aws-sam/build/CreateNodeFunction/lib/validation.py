@@ -88,9 +88,9 @@ def validate_iso8601(timestamp: str) -> Tuple[bool, Optional[str]]:
 
 
 def validate_file_slot(slot: str) -> Tuple[bool, Optional[str]]:
-    """Validate file slot is either 'inputs' or 'outputs'."""
-    if slot not in ["inputs", "outputs"]:
-        return False, "slot must be either 'inputs' or 'outputs'"
+    """Validate file slot is either 'inputs', 'outputs', or 'evidence'."""
+    if slot not in ["inputs", "outputs", "evidence"]:
+        return False, "slot must be one of: inputs, outputs, evidence"
     return True, None
 
 

@@ -7,6 +7,6 @@ architecture = "x86_64"
 handler = "handlers.canvases.create_canvas"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["CreateCanvasFunction", "JoinCanvasFunction", "ListCanvasesFunction", "GetNodesFunction", "CreateNodeFunction", "UpdateNodeFunction", "DeleteNodeFunction", "PresignFileFunction", "CompleteFileFunction"]
+functions = ["CreateCanvasFunction", "JoinCanvasFunction", "ListCanvasesFunction", "GetNodesFunction", "CreateNodeFunction", "UpdateNodeFunction", "DeleteNodeFunction", "PresignFileFunction", "CompleteFileFunction", "DownloadFileFunction"]
 
 [layer_build_definitions]
