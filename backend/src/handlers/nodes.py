@@ -750,6 +750,13 @@ def execute_node(event, context):
             if not valid:
                 return error_response(code="INVALID_REQUEST", message=error_msg)
 
+        refresh_token = body.get("refreshToken")
+        if refresh_token is not None and not isinstance(refresh_token, str):
+            return error_response(
+                code="INVALID_REQUEST",
+                message="refreshToken must be a string",
+            )
+
         gateway_base_url = os.environ.get("GATEWAY_API_BASE_URL", "").strip().rstrip("/")
         if not gateway_base_url:
             return internal_error_response("Gateway API base URL is not configured")
@@ -766,6 +773,8 @@ def execute_node(event, context):
         }
         if user_token:
             payload["userToken"] = user_token
+        if isinstance(refresh_token, str) and refresh_token.strip():
+            payload["refreshToken"] = refresh_token.strip()
         if body.get("approvalMode"):
             payload["approvalMode"] = body.get("approvalMode")
 
