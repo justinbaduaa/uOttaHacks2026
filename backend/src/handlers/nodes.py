@@ -217,17 +217,14 @@ def create_node(event, context):
         inputs = body.get("inputs", [])
         outputs = body.get("outputs", [])
         evidence = body.get("evidence")
-<<<<<<< HEAD
-        position_x = body.get("x")
-        position_y = body.get("y")
-=======
         approval_mode = body.get("approvalMode")
         assigned_to = body.get("assignedTo")
         status = body.get("status", "draft")
         activity_log = body.get("activityLog")
         approval_requests = body.get("approvalRequests")
         active_task_id = body.get("activeTaskId")
->>>>>>> origin/solace-integration
+        position_x = body.get("x")
+        position_y = body.get("y")
 
         # Validate inputs/outputs
         if inputs:
@@ -244,21 +241,6 @@ def create_node(event, context):
         if evidence_error:
             return error_response(code="INVALID_REQUEST", message=evidence_error)
 
-<<<<<<< HEAD
-        if position_x is not None or position_y is not None:
-            if position_x is None or position_y is None:
-                return error_response(
-                    code="INVALID_REQUEST",
-                    message="x and y must be provided together",
-                )
-            if not isinstance(position_x, (int, float)) or not isinstance(position_y, (int, float)):
-                return error_response(
-                    code="INVALID_REQUEST",
-                    message="x and y must be numbers",
-                )
-            position_x = Decimal(str(position_x))
-            position_y = Decimal(str(position_y))
-=======
         if approval_mode is not None:
             valid, error_msg = validate_approval_mode(approval_mode)
             if not valid:
@@ -289,40 +271,25 @@ def create_node(event, context):
                     code="INVALID_REQUEST",
                     message="evidence is required before marking an agent-assigned node completed",
                 )
->>>>>>> origin/solace-integration
+
+        if position_x is not None or position_y is not None:
+            if position_x is None or position_y is None:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be provided together",
+                )
+            if not isinstance(position_x, (int, float)) or not isinstance(position_y, (int, float)):
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be numbers",
+                )
+            position_x = Decimal(str(position_x))
+            position_y = Decimal(str(position_y))
 
         # Generate node ID
         node_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat() + "Z"
 
-        # Create node item
-        item = {
-            "PK": f"CANVAS#{canvas_id}",
-            "SK": f"NODE#{node_id}",
-            "GSI1PK": f"CANVAS#{canvas_id}#PARENT#{parent_node_id}",
-            "GSI1SK": f"UPDATED#{now}#NODE#{node_id}",
-            "nodeId": node_id,
-            "canvasId": canvas_id,
-            "parentNodeId": parent_node_id,
-            "title": title,
-            "description": description,
-            "inputs": inputs or [],
-            "outputs": outputs or [],
-            "evidence": normalized_evidence,
-            "authorSub": user_sub,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-        if position_x is not None and position_y is not None:
-            item["x"] = position_x
-            item["y"] = position_y
-
-        table = get_nodes_table()
-<<<<<<< HEAD
-        table.put_item(
-            Item=item
-        )
-=======
         item = {
             "PK": f"CANVAS#{canvas_id}",
             "SK": f"NODE#{node_id}",
@@ -348,9 +315,12 @@ def create_node(event, context):
             item["approvalMode"] = approval_mode
         if assigned_to is not None:
             item["assignedTo"] = assigned_to
+        if position_x is not None and position_y is not None:
+            item["x"] = position_x
+            item["y"] = position_y
 
+        table = get_nodes_table()
         table.put_item(Item=item)
->>>>>>> origin/solace-integration
 
         logger.info(f"Created node {node_id} in canvas {canvas_id}")
 

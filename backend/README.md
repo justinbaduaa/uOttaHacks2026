@@ -86,11 +86,8 @@ Authorization: Bearer <jwt-token>
 #### Node Management
 
 - `GET /nodes?canvasId={id}&parentNodeId={id}&updatedSince={iso8601}` - List nodes
-<<<<<<< HEAD
 - `GET /nodes?canvasId={id}&updatedSince={iso8601}&includeAll=true` - List all nodes updated since
-=======
 - `GET /nodes/{nodeId}?canvasId={id}` - Get a single node
->>>>>>> origin/solace-integration
 - `POST /nodes` - Create a new node
 - `PATCH /nodes/{nodeId}` - Update a node
 - `DELETE /nodes/{nodeId}?canvasId={id}` - Delete node and descendants

@@ -151,12 +151,55 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
+  executeNode(nodeId, payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.executeNode) {
+      return window.glassBox.api.executeNode(token, nodeId, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  approveNodeAction(nodeId, payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.approveNodeAction) {
+      return window.glassBox.api.approveNodeAction(token, nodeId, payload);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
   leavePresence(canvasId) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.leavePresence) {
       return window.glassBox.api.leavePresence(token, canvasId);
     }
     return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  startGatewayStream(payload) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.startGatewayStream) {
+      return window.glassBox.api.startGatewayStream({ token, ...payload });
+    }
+    return Promise.resolve(null);
+  },
+
+  stopGatewayStream(payload) {
+    if (window.glassBox?.api?.stopGatewayStream) {
+      return window.glassBox.api.stopGatewayStream(payload);
+    }
+    return Promise.resolve(null);
+  },
+
+  onGatewayStreamEvent(handler) {
+    if (window.glassBox?.api?.onGatewayStreamEvent) {
+      window.glassBox.api.onGatewayStreamEvent(handler);
+    }
+  },
+
+  onGatewayStreamError(handler) {
+    if (window.glassBox?.api?.onGatewayStreamError) {
+      window.glassBox.api.onGatewayStreamError(handler);
+    }
   },
 
   uploadToS3(url, contentType, data) {
@@ -166,6 +209,9 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 };
+
+const DEFAULT_AGENT_ID = 'GlassBoxOrchestrator';
+const DEFAULT_AGENT_LABEL = 'Orchestrator';
 
 const Canvas = {
   container: null,
@@ -188,6 +234,11 @@ const Canvas = {
   isNodeDeleteVisible: false,
   canvasToast: null,
   canvasToastTimeout: null,
+  delegatePopover: null,
+  activeDelegateNodeId: null,
+  approvalPopover: null,
+  activeApprovalNodeId: null,
+  activeGatewayStreams: new Set(),
   state: {
     canvases: [],
     selectedCanvasId: null,
@@ -280,6 +331,9 @@ const Canvas = {
     this.setupEvidenceListeners();
     this.setupGlobalIconPopover();
     this.setupGlobalUserPicker();
+    this.setupGlobalDelegatePopover();
+    this.setupGlobalApprovalPopover();
+    this.registerGatewayStreamHandlers();
     this.updateProfile();
     this.renderSidebar();
     this.updateBreadcrumb();
@@ -567,6 +621,25 @@ const Canvas = {
 
     if (this.evidenceList) {
       this.evidenceList.addEventListener('click', (e) => {
+        const linkItem = e.target.closest('.evidence-item[data-link-url]');
+        if (linkItem) {
+          const url = linkItem.dataset.linkUrl ? decodeURIComponent(linkItem.dataset.linkUrl) : '';
+          if (url) {
+            window.open(url, '_blank', 'noopener');
+          }
+          return;
+        }
+
+        const nodeItem = e.target.closest('.evidence-item[data-node-id]');
+        if (nodeItem) {
+          const nodeId = nodeItem.dataset.nodeId || '';
+          const node = this.getNode(nodeId);
+          if (node) {
+            this.navigateIntoNode(node);
+          }
+          return;
+        }
+
         const fileItem = e.target.closest('.evidence-item[data-file-id], .evidence-item[data-s3-key]');
         if (fileItem) {
           const fileId = fileItem.dataset.fileId || '';
@@ -999,6 +1072,7 @@ const Canvas = {
     }
     const previousCanvasId = this.state.selectedCanvasId;
     this.stopPolling();
+    this.stopAllGatewayStreams();
     this.pendingPositionUpdates.clear();
     this.positionSyncInFlight = false;
     if (previousCanvasId) {
@@ -1037,6 +1111,11 @@ const Canvas = {
         .filter(node => !node.deletedAt)
         .map(node => this.normalizeNodeFromApi(node));
       this.state.nodes = normalized;
+      normalized.forEach((node) => {
+        if (node.activeTaskId || node.status === 'in-progress') {
+          this.ensureGatewayStream(node.id);
+        }
+      });
       const latestUpdate = this.getLatestUpdatedAt(normalized);
       if (latestUpdate) {
         this.state.lastSyncByCanvas[canvasId] = latestUpdate;
@@ -1296,7 +1375,9 @@ const Canvas = {
     const iconName = nodeData.icon || 'box';
     const inputs = nodeData.inputs || [];
     const outputs = nodeData.outputs || [];
-    const evidenceFiles = Array.isArray(nodeData?.evidence?.files) ? nodeData.evidence.files : [];
+    const evidenceFiles = Array.isArray(nodeData?.evidence?.files)
+      ? nodeData.evidence.files.filter(item => !item.type || item.type === 'file')
+      : [];
     // If no inputs (new node), showing some mocks provided by user request or keep empty
     // The user request said "drop in it... add a number of resources... dropdown to view"
     // So we start empty or with existing data.
@@ -1333,12 +1414,36 @@ const Canvas = {
           
           <div class="input-list-container" style="display: none;">
              <div class="input-list">
-                ${inputs.map(input => `
-                  <div class="input-item" data-file-id="${this.escapeHtml(input.fileId || '')}" data-s3-key="${this.escapeHtml(input.s3Key || '')}">
-                    <span class="input-item-icon"><i data-lucide="${this.escapeHtml(input.icon || 'file')}"></i></span>
-                    <span class="input-item-text">${this.escapeHtml(input.filename || input.name || 'File')}</span>
-                  </div>
-                `).join('')}
+                ${inputs.map((input) => {
+                  const type = input.type || 'file';
+                  const icon = type === 'text'
+                    ? 'message-square'
+                    : type === 'link'
+                      ? 'link-2'
+                      : type === 'node'
+                        ? 'layers'
+                        : (input.icon || 'file');
+                  const label = type === 'text'
+                    ? (input.text || 'Text')
+                    : type === 'link'
+                      ? (input.title || input.url || 'Link')
+                      : type === 'node'
+                        ? (input.nodeId || 'Node')
+                        : (input.filename || input.name || 'File');
+                  const dataAttrs = type === 'file'
+                    ? `data-file-id="${this.escapeHtml(input.fileId || '')}" data-s3-key="${this.escapeHtml(input.s3Key || '')}"`
+                    : type === 'link'
+                      ? `data-link-url="${encodeURIComponent(input.url || '')}"`
+                      : type === 'node'
+                        ? `data-node-id="${this.escapeHtml(input.nodeId || '')}"`
+                        : '';
+                  return `
+                    <div class="input-item" data-type="${this.escapeHtml(type)}" ${dataAttrs}>
+                      <span class="input-item-icon"><i data-lucide="${this.escapeHtml(icon)}"></i></span>
+                      <span class="input-item-text">${this.escapeHtml(label)}</span>
+                    </div>
+                  `;
+                }).join('')}
                 ${evidenceFiles.map(file => `
                   <div class="input-item" data-file-id="${this.escapeHtml(file.fileId || '')}" data-s3-key="${this.escapeHtml(file.s3Key || '')}">
                      <span class="input-item-icon"><i data-lucide="file"></i></span>
@@ -1377,6 +1482,11 @@ const Canvas = {
           </div>
         </div>
 
+        <div class="node-actions">
+          <button class="delegate-button" type="button">Delegate</button>
+          <button class="approval-button" type="button">Approvals</button>
+        </div>
+
         <!-- Start Output Toggle -->
         <button class="node-footer-toggle" aria-label="Toggle Output">
           <span class="adjust-text">Output</span>
@@ -1394,12 +1504,36 @@ const Canvas = {
           </div>
           <div class="output-list-container" style="display: none;">
             <div class="output-list">
-              ${outputs.map(output => `
-                <div class="input-item" data-file-id="${this.escapeHtml(output.fileId || '')}" data-s3-key="${this.escapeHtml(output.s3Key || '')}">
-                  <span class="input-item-icon"><i data-lucide="file"></i></span>
-                  <span class="input-item-text">${this.escapeHtml(output.filename || output.name || 'File')}</span>
-                </div>
-              `).join('')}
+              ${outputs.map((output) => {
+                const type = output.type || 'file';
+                const icon = type === 'text'
+                  ? 'message-square'
+                  : type === 'link'
+                    ? 'link-2'
+                    : type === 'node'
+                      ? 'layers'
+                      : 'file';
+                const label = type === 'text'
+                  ? (output.text || 'Text')
+                  : type === 'link'
+                    ? (output.title || output.url || 'Link')
+                    : type === 'node'
+                      ? (output.nodeId || 'Node')
+                      : (output.filename || output.name || 'File');
+                const dataAttrs = type === 'file'
+                  ? `data-file-id="${this.escapeHtml(output.fileId || '')}" data-s3-key="${this.escapeHtml(output.s3Key || '')}"`
+                  : type === 'link'
+                    ? `data-link-url="${encodeURIComponent(output.url || '')}"`
+                    : type === 'node'
+                      ? `data-node-id="${this.escapeHtml(output.nodeId || '')}"`
+                      : '';
+                return `
+                  <div class="input-item" data-type="${this.escapeHtml(type)}" ${dataAttrs}>
+                    <span class="input-item-icon"><i data-lucide="${this.escapeHtml(icon)}"></i></span>
+                    <span class="input-item-text">${this.escapeHtml(label)}</span>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
           <div class="drop-zone output-drop-zone">
@@ -1411,6 +1545,8 @@ const Canvas = {
     `;
 
     this.attachNodeEditing(element, nodeData);
+    this.applyAssigneeDisplay(nodeData, element);
+    this.applyApprovalState(nodeData, element);
 
     // --- Event Listeners for New Features ---
 
@@ -1484,11 +1620,29 @@ const Canvas = {
 
     if (inputListContainer) {
       inputListContainer.addEventListener('click', (e) => {
-        const item = e.target.closest('.input-item[data-file-id], .input-item[data-s3-key]');
+        const item = e.target.closest('.input-item');
         if (!item) return;
-        const fileId = item.dataset.fileId || '';
-        const s3Key = item.dataset.s3Key || '';
-        this.downloadNodeFile(nodeData, { fileId, s3Key });
+        const type = item.dataset.type || 'file';
+        if (type === 'file') {
+          const fileId = item.dataset.fileId || '';
+          const s3Key = item.dataset.s3Key || '';
+          this.downloadNodeFile(nodeData, { fileId, s3Key });
+          return;
+        }
+        if (type === 'link') {
+          const url = item.dataset.linkUrl ? decodeURIComponent(item.dataset.linkUrl) : '';
+          if (url) {
+            window.open(url, '_blank', 'noopener');
+          }
+          return;
+        }
+        if (type === 'node') {
+          const nodeId = item.dataset.nodeId || '';
+          const target = this.getNode(nodeId);
+          if (target) {
+            this.navigateIntoNode(target);
+          }
+        }
       });
     }
 
@@ -1524,11 +1678,29 @@ const Canvas = {
 
     if (outputList) {
       outputList.addEventListener('click', (e) => {
-        const item = e.target.closest('.input-item[data-file-id], .input-item[data-s3-key]');
+        const item = e.target.closest('.input-item');
         if (!item) return;
-        const fileId = item.dataset.fileId || '';
-        const s3Key = item.dataset.s3Key || '';
-        this.downloadNodeFile(nodeData, { fileId, s3Key });
+        const type = item.dataset.type || 'file';
+        if (type === 'file') {
+          const fileId = item.dataset.fileId || '';
+          const s3Key = item.dataset.s3Key || '';
+          this.downloadNodeFile(nodeData, { fileId, s3Key });
+          return;
+        }
+        if (type === 'link') {
+          const url = item.dataset.linkUrl ? decodeURIComponent(item.dataset.linkUrl) : '';
+          if (url) {
+            window.open(url, '_blank', 'noopener');
+          }
+          return;
+        }
+        if (type === 'node') {
+          const nodeId = item.dataset.nodeId || '';
+          const target = this.getNode(nodeId);
+          if (target) {
+            this.navigateIntoNode(target);
+          }
+        }
       });
     }
 
@@ -1543,6 +1715,26 @@ const Canvas = {
          e.preventDefault();
          this.toggleUserPicker(e, nodeData, assigneeBtn);
        });
+    }
+
+    const delegateBtn = element.querySelector('.delegate-button');
+    if (delegateBtn) {
+      delegateBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+      delegateBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.toggleDelegatePopover(e, nodeData, delegateBtn);
+      });
+    }
+
+    const approvalBtn = element.querySelector('.approval-button');
+    if (approvalBtn) {
+      approvalBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+      approvalBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.toggleApprovalPopover(e, nodeData, approvalBtn);
+      });
     }
 
     // Drag listeners (Target node-content but exclude interactive elements)
@@ -1812,6 +2004,7 @@ const Canvas = {
       }
       return node;
     });
+    this.updateNodeCardIndicators(nodeId);
   },
 
   collectSubtreeNodeIds(nodeId) {
@@ -2143,19 +2336,90 @@ const Canvas = {
   },
 
   normalizeEvidencePayload(evidence) {
-    const notes = Array.isArray(evidence?.notes) ? evidence.notes.map((item, index) => {
+    const notes = [];
+    const files = [];
+
+    if (Array.isArray(evidence)) {
+      evidence.forEach((item, index) => {
+        if (!item || typeof item !== 'object') {
+          return;
+        }
+        if (item.type === 'text') {
+          const text = item.text || item.content || '';
+          notes.push({
+            noteId: item.noteId || item.id || `note-${index}`,
+            text,
+            createdAt: item.createdAt || item.timestamp || null,
+          });
+        } else {
+          files.push(item);
+        }
+      });
+      return { notes, files };
+    }
+
+    const legacyNotes = Array.isArray(evidence?.notes) ? evidence.notes : [];
+    legacyNotes.forEach((item, index) => {
       if (typeof item === 'string') {
-        return { noteId: `note-${index}`, text: item, createdAt: null };
+        notes.push({ noteId: `note-${index}`, text: item, createdAt: null });
+        return;
       }
       const text = item.text || item.content || '';
-      return {
+      notes.push({
         noteId: item.noteId || item.id || `note-${index}`,
         text,
         createdAt: item.createdAt || item.timestamp || null,
-      };
-    }) : [];
-    const files = Array.isArray(evidence?.files) ? evidence.files : [];
+      });
+    });
+    const legacyFiles = Array.isArray(evidence?.files) ? evidence.files : [];
+    legacyFiles.forEach((item) => {
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      if (!item.type) {
+        files.push({ ...item, type: 'file' });
+      } else {
+        files.push(item);
+      }
+    });
     return { notes, files };
+  },
+
+  serializeEvidence(evidence) {
+    const items = [];
+    const notes = Array.isArray(evidence?.notes) ? evidence.notes : [];
+    notes.forEach((note, index) => {
+      if (typeof note === 'string') {
+        items.push({ type: 'text', text: note });
+        return;
+      }
+      const text = note.text || note.content || '';
+      const entry = {
+        type: 'text',
+        text,
+      };
+      if (note.noteId || note.id) {
+        entry.noteId = note.noteId || note.id;
+      }
+      if (note.createdAt || note.timestamp) {
+        entry.createdAt = note.createdAt || note.timestamp;
+      }
+      items.push(entry);
+    });
+
+    const files = Array.isArray(evidence?.files) ? evidence.files : [];
+    files.forEach((item) => {
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      if (!item.type) {
+        items.push({ ...item, type: 'file' });
+        return;
+      }
+      items.push(item);
+    });
+
+    return items;
   },
 
   async ensureCanvasEvidence(canvasId) {
@@ -2227,8 +2491,9 @@ const Canvas = {
           const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || updated);
           this.state.canvasEvidenceById[canvasId] = updatedEvidence;
         } else {
+          const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || context.node.evidence);
           this.applyNodeUpdates(context.node.id, {
-            evidence: updated?.evidence || context.node.evidence,
+            evidence: updatedEvidence,
             updatedAt: updated?.updatedAt || context.node.updatedAt,
           }, context.node);
         }
@@ -2321,9 +2586,9 @@ const Canvas = {
     try {
       const updated = await Api.updateNode(node.id, {
         canvasId: this.state.selectedCanvasId,
-        evidence,
+        evidence: this.serializeEvidence(evidence),
       });
-      const updatedEvidence = updated?.evidence || evidence;
+      const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || evidence);
       this.applyNodeUpdates(node.id, {
         evidence: updatedEvidence,
         updatedAt: updated?.updatedAt || node.updatedAt,
@@ -2343,7 +2608,7 @@ const Canvas = {
       return;
     }
     try {
-      const updated = await Api.updateCanvasEvidence(canvasId, evidence);
+      const updated = await Api.updateCanvasEvidence(canvasId, this.serializeEvidence(evidence));
       const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || updated);
       this.state.canvasEvidenceById[canvasId] = updatedEvidence;
       this.updateEvidenceSidebar();
@@ -2421,7 +2686,34 @@ const Canvas = {
 
     const files = Array.isArray(evidence?.files) ? evidence.files : [];
     files.forEach((file, index) => {
-      if (file.type && file.type !== 'file') {
+      const fileType = file.type || 'file';
+      if (fileType === 'link') {
+        entries.push({
+          type: 'link',
+          url: file.url || '',
+          title: file.title || file.url || 'Link',
+          timestamp: file.createdAt || fallbackTimestamp || '',
+          id: `link-${index}`,
+        });
+        return;
+      }
+      if (fileType === 'node') {
+        entries.push({
+          type: 'node',
+          nodeId: file.nodeId || '',
+          title: file.title || file.nodeId || 'Node',
+          timestamp: file.createdAt || fallbackTimestamp || '',
+          id: `node-${index}`,
+        });
+        return;
+      }
+      if (fileType === 'text') {
+        entries.push({
+          type: 'note',
+          noteId: `text-${index}`,
+          text: file.text || file.content || '',
+          timestamp: file.createdAt || fallbackTimestamp || '',
+        });
         return;
       }
       entries.push({
@@ -2465,23 +2757,42 @@ const Canvas = {
 
   renderEvidenceItem(entry) {
     const timestamp = this.formatTime(entry.timestamp);
-    const isNote = entry.type === 'note';
-    const isPdf = !isNote && this.isPdfFile(entry);
-    const text = isNote ? entry.text : entry.name;
-    const icon = isNote
-      ? '<span class="evidence-bullet"></span>'
-      : `<i data-lucide="${isPdf ? 'star' : 'file'}"></i>`;
+    const entryType = entry.type || 'file';
+    const isNote = entryType === 'note';
+    const isLink = entryType === 'link';
+    const isNode = entryType === 'node';
+    const isFile = entryType === 'file';
+    const isPdf = isFile && this.isPdfFile(entry);
+    const text = isNote ? entry.text : (entry.title || entry.name || entry.url || entry.nodeId);
+    let icon = '<i data-lucide="file"></i>';
+    if (isNote) {
+      icon = '<span class="evidence-bullet"></span>';
+    } else if (isLink) {
+      icon = '<i data-lucide="link-2"></i>';
+    } else if (isNode) {
+      icon = '<i data-lucide="layers"></i>';
+    } else if (isPdf) {
+      icon = '<i data-lucide="star"></i>';
+    }
 
     const noteAttrs = isNote
       ? `contenteditable="true" class="evidence-text evidence-note" data-note-id="${this.escapeHtml(entry.noteId || '')}"`
       : 'class="evidence-text"';
 
-    const fileAttrs = !isNote
+    const fileAttrs = isFile
       ? `data-file-id="${this.escapeHtml(entry.fileId || '')}" data-s3-key="${this.escapeHtml(entry.s3Key || '')}"`
       : '';
 
+    const linkAttrs = isLink
+      ? `data-link-url="${encodeURIComponent(entry.url || '')}"`
+      : '';
+
+    const nodeAttrs = isNode
+      ? `data-node-id="${this.escapeHtml(entry.nodeId || '')}"`
+      : '';
+
     return `
-      <div class="evidence-item" ${fileAttrs}>
+      <div class="evidence-item" ${fileAttrs} ${linkAttrs} ${nodeAttrs}>
         <div class="evidence-icon">${icon}</div>
         <div class="evidence-body">
           <div ${noteAttrs}>${this.escapeHtml(text || 'Untitled')}</div>
@@ -2492,6 +2803,9 @@ const Canvas = {
   },
 
   isPdfFile(entry) {
+    if (entry.type && entry.type !== 'file') {
+      return false;
+    }
     const name = (entry?.name || '').toLowerCase();
     const type = (entry?.fileType || '').toLowerCase();
     return type.includes('pdf') || name.endsWith('.pdf');
@@ -2665,6 +2979,102 @@ const Canvas = {
     });
   },
 
+  setupGlobalDelegatePopover() {
+    this.delegatePopover = document.createElement('div');
+    this.delegatePopover.className = 'delegate-popover';
+    this.delegatePopover.innerHTML = `
+      <div class="delegate-popover-content"></div>
+    `;
+    document.body.appendChild(this.delegatePopover);
+
+    document.addEventListener('click', (e) => {
+      if (
+        this.delegatePopover &&
+        this.delegatePopover.classList.contains('is-visible') &&
+        !this.delegatePopover.contains(e.target) &&
+        !e.target.closest('.delegate-button')
+      ) {
+        this.delegatePopover.classList.remove('is-visible');
+        this.activeDelegateNodeId = null;
+      }
+    });
+  },
+
+  setupGlobalApprovalPopover() {
+    this.approvalPopover = document.createElement('div');
+    this.approvalPopover.className = 'approval-popover';
+    this.approvalPopover.innerHTML = `
+      <div class="approval-popover-content"></div>
+    `;
+    document.body.appendChild(this.approvalPopover);
+
+    document.addEventListener('click', (e) => {
+      if (
+        this.approvalPopover &&
+        this.approvalPopover.classList.contains('is-visible') &&
+        !this.approvalPopover.contains(e.target) &&
+        !e.target.closest('.approval-button')
+      ) {
+        this.approvalPopover.classList.remove('is-visible');
+        this.activeApprovalNodeId = null;
+      }
+    });
+  },
+
+  registerGatewayStreamHandlers() {
+    Api.onGatewayStreamEvent((payload) => {
+      this.handleGatewayStreamEvent(payload);
+    });
+    Api.onGatewayStreamError((payload) => {
+      this.handleGatewayStreamError(payload);
+    });
+  },
+
+  handleGatewayStreamEvent(payload) {
+    if (!payload || !payload.nodeId) {
+      return;
+    }
+    if (payload.canvasId && payload.canvasId !== this.state.selectedCanvasId) {
+      return;
+    }
+    if (payload.event === 'activity_log' && payload.data?.entries) {
+      const node = this.state.nodesById[payload.nodeId];
+      if (node) {
+        node.activityLog = payload.data.entries;
+      }
+    }
+    this.pollNodes();
+  },
+
+  handleGatewayStreamError(payload) {
+    if (!payload || payload.canvasId !== this.state.selectedCanvasId) {
+      return;
+    }
+    const message = payload.error || payload.message || 'Gateway stream error';
+    this.showCanvasToast(message, 'error');
+  },
+
+  async ensureGatewayStream(nodeId) {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId || !nodeId) {
+      return;
+    }
+    const key = `${canvasId}:${nodeId}`;
+    if (this.activeGatewayStreams.has(key)) {
+      return;
+    }
+    await Api.startGatewayStream({ canvasId, nodeId });
+    this.activeGatewayStreams.add(key);
+  },
+
+  stopAllGatewayStreams() {
+    this.activeGatewayStreams.forEach((key) => {
+      const [canvasId, nodeId] = key.split(':');
+      Api.stopGatewayStream({ canvasId, nodeId });
+    });
+    this.activeGatewayStreams.clear();
+  },
+
   toggleUserPicker(e, nodeData, triggerBtn) {
     if (!this.userPickerPopover) return;
     
@@ -2682,10 +3092,10 @@ const Canvas = {
     // 1. Agent Option
     let html = `
       <div class="user-picker-section">AI Agents</div>
-      <button class="user-option" data-type="agent" data-id="agent-001" data-name="Glass Agent" data-color="#ec4899">
+      <button class="user-option" data-type="agent" data-id="${DEFAULT_AGENT_ID}" data-name="${DEFAULT_AGENT_LABEL}" data-color="#ec4899">
         <div class="user-option-avatar is-agent"><i data-lucide="bot"></i></div>
         <div class="user-option-info">
-          <span class="user-option-name">Glass Agent</span>
+          <span class="user-option-name">${DEFAULT_AGENT_LABEL}</span>
           <span class="user-option-status">Always online</span>
         </div>
       </button>
@@ -2693,29 +3103,24 @@ const Canvas = {
 
     // 2. Active Users
     const activeUsers = this.state.activeUsers || [];
-    // Add current user to list if not present
-    const currentUserSub = this.getCurrentUserSub();
-    // In a real app we'd fetch full user profiles. Here we mock "Me" + active users.
+    const currentUser = this.getCurrentUserProfile();
     const usersList = [...activeUsers];
-    if (!usersList.some(u => u.sub === currentUserSub)) {
-       usersList.unshift({ sub: currentUserSub, name: 'Me', color: '#2563eb' });
+    if (!usersList.some(u => u.userId === currentUser.userId)) {
+       usersList.unshift({
+         userId: currentUser.userId,
+         displayName: currentUser.displayName,
+         initial: currentUser.initial,
+       });
     }
 
     if (usersList.length > 0) {
        html += `<div class="user-picker-section">Active Users</div>`;
        usersList.forEach(user => {
          // Resolve Name
-         let displayName = user.name;
+         let displayName = user.displayName || user.name || user.email;
          if (!displayName) {
-            if (user.email) {
-               displayName = user.email.split('@')[0]; // Use part before @
-            } else if (user.sub) {
-               // Fallback: "User 1234"
-               const suffix = user.sub.slice(-4);
-               displayName = `User ${suffix}`;
-            } else {
-               displayName = 'Anonymous';
-            }
+            const suffix = (user.userId || user.sub || '').slice(-4);
+            displayName = suffix ? `User ${suffix}` : 'Anonymous';
          }
 
          // Initials
@@ -2731,16 +3136,10 @@ const Canvas = {
          }
 
          // Color
-         let color = user.color;
-         if (!color) {
-            // Hash sub to pick a color
-            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#6366f1'];
-            const hash = (user.sub || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            color = colors[hash % colors.length];
-         }
+         let color = user.color || this.getUserColor(user.userId || user.sub || '');
 
          html += `
-           <button class="user-option" data-type="user" data-id="${this.escapeHtml(user.sub)}" data-name="${this.escapeHtml(displayName)}" data-initials="${initials}" data-color="${color}">
+           <button class="user-option" data-type="human" data-id="${this.escapeHtml(user.userId || user.sub || '')}" data-name="${this.escapeHtml(displayName)}" data-initials="${initials}" data-color="${color}">
              <div class="user-option-avatar is-user" style="background: ${color}">
                ${initials}
                <span class="user-option-active"></span>
@@ -2789,35 +3188,301 @@ const Canvas = {
     });
   },
 
-  updateNodeAssignee(nodeData, assignee) {
-     // Save locally
-     nodeData.assignee = assignee;
-     
-     // Update DOM
-     const node = this.nodes.find(n => n.data.id === nodeData.id);
-     if (node) {
-        const assigneeBtn = node.element.querySelector('.assignee-button');
-        const initialsEl = assigneeBtn.querySelector('.assignee-initials');
-        const iconEl = assigneeBtn.querySelector('.assignee-icon');
-        
-        if (assigneeBtn && initialsEl && iconEl) {
-           assigneeBtn.classList.add('assigned');
-           assigneeBtn.style.setProperty('--avatar-color', assignee.color);
-           
-           if (assignee.type === 'agent') {
-              initialsEl.innerHTML = '<i data-lucide="bot" style="width:14px;height:14px;"></i>';
-              initialsEl.style.display = 'flex';
-              iconEl.style.display = 'none';
-              if (window.lucide) window.lucide.createIcons({ root: initialsEl });
-           } else {
-              initialsEl.textContent = assignee.initials || assignee.name.substring(0,2).toUpperCase();
-              initialsEl.style.display = 'flex';
-              iconEl.style.display = 'none';
-           }
+  async updateNodeAssignee(nodeData, assignee) {
+    if (!nodeData || !nodeData.id || !this.state.selectedCanvasId) {
+      return;
+    }
+    const assignedTo = {
+      type: assignee.type,
+      id: assignee.id,
+    };
+
+    try {
+      const updated = await Api.updateNode(nodeData.id, {
+        canvasId: this.state.selectedCanvasId,
+        assignedTo,
+      });
+      const normalized = this.normalizeNodeFromApi(updated);
+      this.applyNodeUpdates(nodeData.id, normalized, nodeData);
+      this.updateNodeCardIndicators(nodeData.id);
+      this.showCanvasToast('Assignee updated.', 'success');
+    } catch (error) {
+      console.error('[Canvas] Failed to update assignee', error);
+      this.showCanvasToast(error.message || 'Failed to update assignee.', 'error');
+    }
+  },
+
+  resolveAssigneeDisplay(assignedTo) {
+    if (!assignedTo || !assignedTo.type || !assignedTo.id) {
+      return null;
+    }
+    if (assignedTo.type === 'agent') {
+      return {
+        type: 'agent',
+        label: DEFAULT_AGENT_LABEL,
+        initials: 'AI',
+        color: '#ec4899',
+      };
+    }
+    const userId = assignedTo.id;
+    const activeUser = (this.state.activeUsers || []).find(user => user.userId === userId);
+    const name = activeUser?.displayName || `User ${userId.slice(-4)}`;
+    return {
+      type: 'human',
+      label: name,
+      initials: this.getInitials(name),
+      color: this.getUserColor(userId),
+    };
+  },
+
+  getUserColor(userId) {
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#6366f1'];
+    const hash = String(userId || '')
+      .split('')
+      .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  },
+
+  applyAssigneeDisplay(nodeData, element) {
+    if (!element) {
+      return;
+    }
+    const assigneeBtn = element.querySelector('.assignee-button');
+    if (!assigneeBtn) {
+      return;
+    }
+    const initialsEl = assigneeBtn.querySelector('.assignee-initials');
+    const iconEl = assigneeBtn.querySelector('.assignee-icon');
+    const display = this.resolveAssigneeDisplay(nodeData.assignedTo);
+
+    if (!display) {
+      assigneeBtn.classList.remove('assigned');
+      assigneeBtn.style.removeProperty('--avatar-color');
+      assigneeBtn.title = 'Assign User';
+      if (initialsEl) {
+        initialsEl.textContent = '';
+        initialsEl.style.display = 'none';
+      }
+      if (iconEl) {
+        iconEl.style.display = 'block';
+      }
+    } else {
+      assigneeBtn.classList.add('assigned');
+      assigneeBtn.style.setProperty('--avatar-color', display.color);
+      assigneeBtn.title = display.label;
+      if (initialsEl) {
+        if (display.type === 'agent') {
+          initialsEl.innerHTML = '<i data-lucide="bot"></i>';
+        } else {
+          initialsEl.textContent = display.initials || '?';
         }
-     }
-     
-     // Optionally save to API here via Api.updateNode
+        initialsEl.style.display = 'flex';
+      }
+      if (iconEl) {
+        iconEl.style.display = 'none';
+      }
+      if (display.type === 'agent' && window.lucide && initialsEl) {
+        window.lucide.createIcons({ root: initialsEl });
+      }
+    }
+
+    const delegateBtn = element.querySelector('.delegate-button');
+    if (delegateBtn) {
+      const enabled = display && display.type === 'agent';
+      delegateBtn.disabled = !enabled;
+      delegateBtn.classList.toggle('is-hidden', !enabled);
+    }
+  },
+
+  getPendingApprovals(nodeData) {
+    const approvals = Array.isArray(nodeData?.approvalRequests) ? nodeData.approvalRequests : [];
+    return approvals.filter(request => request.status === 'pending');
+  },
+
+  applyApprovalState(nodeData, element) {
+    if (!element) {
+      return;
+    }
+    const approvalBtn = element.querySelector('.approval-button');
+    if (!approvalBtn) {
+      return;
+    }
+    const pending = this.getPendingApprovals(nodeData);
+    if (pending.length === 0) {
+      approvalBtn.classList.add('is-hidden');
+      approvalBtn.textContent = 'Approvals';
+      return;
+    }
+    approvalBtn.classList.remove('is-hidden');
+    approvalBtn.textContent = `Approvals (${pending.length})`;
+  },
+
+  updateNodeCardIndicators(nodeId) {
+    const nodeEntry = this.nodes.find(node => node.data.id === nodeId);
+    if (!nodeEntry) {
+      return;
+    }
+    this.applyAssigneeDisplay(nodeEntry.data, nodeEntry.element);
+    this.applyApprovalState(nodeEntry.data, nodeEntry.element);
+  },
+
+  toggleDelegatePopover(e, nodeData, triggerBtn) {
+    if (!this.delegatePopover || !nodeData) {
+      return;
+    }
+    const isVisible = this.delegatePopover.classList.contains('is-visible');
+    if (isVisible && this.activeDelegateNodeId === nodeData.id) {
+      this.delegatePopover.classList.remove('is-visible');
+      this.activeDelegateNodeId = null;
+      return;
+    }
+
+    const content = this.delegatePopover.querySelector('.delegate-popover-content');
+    content.innerHTML = `
+      <div class="delegate-section">
+        <div class="delegate-title">Delegate Task</div>
+        <div class="delegate-subtitle">Select approval mode</div>
+      </div>
+      <button class="delegate-option" data-mode="auto">
+        <span class="delegate-option-title">Full access</span>
+        <span class="delegate-option-subtitle">No approvals required</span>
+      </button>
+      <button class="delegate-option" data-mode="approve_nodes">
+        <span class="delegate-option-title">Human-in-the-loop</span>
+        <span class="delegate-option-subtitle">Approve subnodes + completion</span>
+      </button>
+      <button class="delegate-option" data-mode="approve_all">
+        <span class="delegate-option-title">Full human loop</span>
+        <span class="delegate-option-subtitle">Approve every action</span>
+      </button>
+    `;
+
+    const rect = triggerBtn.getBoundingClientRect();
+    this.delegatePopover.style.top = `${rect.bottom + 8}px`;
+    this.delegatePopover.style.left = `${rect.left}px`;
+
+    this.delegatePopover.classList.add('is-visible');
+    this.activeDelegateNodeId = nodeData.id;
+
+    content.querySelectorAll('.delegate-option').forEach((btn) => {
+      btn.onclick = (evt) => {
+        evt.stopPropagation();
+        const mode = btn.dataset.mode;
+        this.delegatePopover.classList.remove('is-visible');
+        this.activeDelegateNodeId = null;
+        this.delegateNode(nodeData, mode);
+      };
+    });
+  },
+
+  async delegateNode(nodeData, approvalMode) {
+    if (!nodeData || !nodeData.id || !this.state.selectedCanvasId) {
+      return;
+    }
+    if (nodeData.activeTaskId) {
+      this.showCanvasToast('Task is already running.', 'error');
+      return;
+    }
+    const assignedTo = nodeData.assignedTo || { type: 'agent', id: DEFAULT_AGENT_ID };
+    if (!assignedTo || assignedTo.type !== 'agent') {
+      this.showCanvasToast('Assign an agent before delegating.', 'error');
+      return;
+    }
+
+    try {
+      const updated = await Api.updateNode(nodeData.id, {
+        canvasId: this.state.selectedCanvasId,
+        assignedTo,
+        approvalMode,
+        status: 'ready',
+      });
+      const normalized = this.normalizeNodeFromApi(updated);
+      this.applyNodeUpdates(nodeData.id, normalized, nodeData);
+      this.updateNodeCardIndicators(nodeData.id);
+
+      await Api.executeNode(nodeData.id, {
+        canvasId: this.state.selectedCanvasId,
+        approvalMode,
+      });
+      await this.ensureGatewayStream(nodeData.id);
+      this.showCanvasToast('Delegation started.', 'success');
+    } catch (error) {
+      console.error('[Canvas] Delegate failed', error);
+      this.showCanvasToast(error.message || 'Failed to delegate task.', 'error');
+    }
+  },
+
+  toggleApprovalPopover(e, nodeData, triggerBtn) {
+    if (!this.approvalPopover || !nodeData) {
+      return;
+    }
+    const pending = this.getPendingApprovals(nodeData);
+    if (pending.length === 0) {
+      return;
+    }
+
+    const isVisible = this.approvalPopover.classList.contains('is-visible');
+    if (isVisible && this.activeApprovalNodeId === nodeData.id) {
+      this.approvalPopover.classList.remove('is-visible');
+      this.activeApprovalNodeId = null;
+      return;
+    }
+
+    const content = this.approvalPopover.querySelector('.approval-popover-content');
+    content.innerHTML = pending.map((request) => {
+      const rationale = request.rationale ? this.escapeHtml(request.rationale) : '';
+      return `
+        <div class="approval-item">
+          <div class="approval-item-header">
+            <span class="approval-item-title">${this.escapeHtml(request.type || 'approval')}</span>
+            <span class="approval-item-status">pending</span>
+          </div>
+          ${rationale ? `<div class="approval-item-body">${rationale}</div>` : ''}
+          <div class="approval-item-actions">
+            <button class="approval-action" data-approval-id="${this.escapeHtml(request.approvalId || '')}" data-decision="approved">Approve</button>
+            <button class="approval-action is-reject" data-approval-id="${this.escapeHtml(request.approvalId || '')}" data-decision="rejected">Reject</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const rect = triggerBtn.getBoundingClientRect();
+    this.approvalPopover.style.top = `${rect.bottom + 8}px`;
+    this.approvalPopover.style.left = `${rect.left}px`;
+
+    this.approvalPopover.classList.add('is-visible');
+    this.activeApprovalNodeId = nodeData.id;
+
+    content.querySelectorAll('.approval-action').forEach((btn) => {
+      btn.onclick = (evt) => {
+        evt.stopPropagation();
+        const approvalId = btn.dataset.approvalId;
+        const decision = btn.dataset.decision;
+        this.resolveApproval(nodeData, approvalId, decision);
+      };
+    });
+  },
+
+  async resolveApproval(nodeData, approvalId, decision) {
+    if (!approvalId || !nodeData?.id || !this.state.selectedCanvasId) {
+      return;
+    }
+    try {
+      const updated = await Api.approveNodeAction(nodeData.id, {
+        canvasId: this.state.selectedCanvasId,
+        approvalId,
+        decision,
+      });
+      const normalized = this.normalizeNodeFromApi(updated);
+      this.applyNodeUpdates(nodeData.id, normalized, nodeData);
+      this.updateNodeCardIndicators(nodeData.id);
+      this.approvalPopover?.classList.remove('is-visible');
+      this.activeApprovalNodeId = null;
+      this.showCanvasToast('Approval updated.', 'success');
+    } catch (error) {
+      console.error('[Canvas] Approval failed', error);
+      this.showCanvasToast(error.message || 'Failed to update approval.', 'error');
+    }
   },
 
   navigateToRoot() {
@@ -2891,7 +3556,7 @@ const Canvas = {
   normalizeNodeFromApi(node) {
     const evidence = this.normalizeEvidencePayload(node?.evidence);
     const evidenceCount = this.getEvidenceItemCount(evidence);
-    const status = this.deriveStatus(node, evidenceCount);
+    const status = this.resolveNodeStatus(node, evidenceCount);
     const author = this.resolveAuthor(node.authorSub);
     const x = this.normalizeNumber(node.x);
     const y = this.normalizeNumber(node.y);
@@ -2908,6 +3573,11 @@ const Canvas = {
       parent: node.parentNodeId === 'ROOT' ? null : node.parentNodeId,
       inputs: Array.isArray(node.inputs) ? node.inputs : [],
       outputs: Array.isArray(node.outputs) ? node.outputs : [],
+      assignedTo: node.assignedTo || null,
+      approvalMode: node.approvalMode || null,
+      approvalRequests: Array.isArray(node.approvalRequests) ? node.approvalRequests : [],
+      activityLog: Array.isArray(node.activityLog) ? node.activityLog : [],
+      activeTaskId: node.activeTaskId || null,
       createdAt: node.createdAt || '',
       updatedAt: node.updatedAt || '',
     };
@@ -2988,6 +3658,9 @@ const Canvas = {
     if (!evidence || typeof evidence !== 'object') {
       return 0;
     }
+    if (Array.isArray(evidence)) {
+      return evidence.length;
+    }
     const notesCount = Array.isArray(evidence.notes) ? evidence.notes.length : 0;
     const filesCount = Array.isArray(evidence.files) ? evidence.files.length : 0;
     return notesCount + filesCount;
@@ -3001,6 +3674,27 @@ const Canvas = {
       return 'in-progress';
     }
     return 'pending';
+  },
+
+  resolveNodeStatus(node, evidenceCount) {
+    const backendStatus = node?.status;
+    if (!backendStatus) {
+      return this.deriveStatus(node, evidenceCount);
+    }
+    switch (backendStatus) {
+      case 'completed':
+        return 'complete';
+      case 'in_progress':
+        return 'in-progress';
+      case 'failed':
+        return 'failed';
+      case 'blocked':
+        return 'blocked';
+      case 'ready':
+      case 'draft':
+      default:
+        return 'planning';
+    }
   },
 
   resolveAuthor(authorSub) {
@@ -3054,6 +3748,8 @@ const Canvas = {
     switch (status) {
       case 'complete': return 'Done';
       case 'in-progress': return 'In Progress';
+      case 'failed': return 'Failed';
+      case 'blocked': return 'Blocked';
       default: return 'Planning';
     }
   },
@@ -3246,6 +3942,7 @@ const Canvas = {
             rendered.element.style.transform = `translate(${incoming.x}px, ${incoming.y}px)`;
           }
         }
+        this.updateNodeCardIndicators(incoming.id);
         if (
           existingEvidenceCount !== incomingEvidenceCount ||
           existingInputsCount !== incomingInputsCount ||
@@ -3253,10 +3950,16 @@ const Canvas = {
         ) {
           needsRefresh = true;
         }
+        if (incoming.activeTaskId || incoming.status === 'in-progress') {
+          this.ensureGatewayStream(incoming.id);
+        }
       } else {
         // New node
         this.state.nodes.push(incoming);
         needsRefresh = true;
+        if (incoming.activeTaskId || incoming.status === 'in-progress') {
+          this.ensureGatewayStream(incoming.id);
+        }
       }
     });
 

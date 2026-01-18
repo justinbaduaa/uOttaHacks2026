@@ -7,10 +7,7 @@ architecture = "x86_64"
 handler = "handlers.canvases.create_canvas"
 manifest_hash = ""
 packagetype = "Zip"
-<<<<<<< HEAD
 functions = ["CreateCanvasFunction", "JoinCanvasFunction", "ListCanvasesFunction", "GetCanvasEvidenceFunction", "UpdateCanvasEvidenceFunction", "GetNodesFunction", "CreateNodeFunction", "UpdateNodeFunction", "DeleteNodeFunction", "PresignFileFunction", "CompleteFileFunction", "DownloadFileFunction", "LeavePresenceFunction"]
-=======
 functions = ["CreateCanvasFunction", "JoinCanvasFunction", "ListCanvasesFunction", "GetNodesFunction", "GetNodeFunction", "CreateNodeFunction", "UpdateNodeFunction", "DeleteNodeFunction", "ExecuteNodeFunction", "ApproveNodeActionFunction", "PresignFileFunction", "CompleteFileFunction", "PresignDownloadFunction"]
->>>>>>> origin/solace-integration
 
 [layer_build_definitions]

@@ -909,6 +909,44 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+.node-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.delegate-button,
+.approval-button {
+  flex: 1;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.delegate-button:hover,
+.approval-button:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.delegate-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.delegate-button.is-hidden,
+.approval-button.is-hidden {
+  display: none;
+}
+
 .stat-item {
   display: flex;
   align-items: center;
@@ -1937,6 +1975,117 @@ button {
   position: absolute;
   bottom: -1px;
   right: -1px;
+}
+
+/* Delegate + Approval Popovers */
+.delegate-popover,
+.approval-popover {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-lg);
+  z-index: 120;
+  display: none;
+  width: 280px;
+}
+
+.delegate-popover.is-visible,
+.approval-popover.is-visible {
+  display: block;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.delegate-section {
+  padding: var(--space-2);
+}
+
+.delegate-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.delegate-subtitle {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.delegate-option {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.delegate-option:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.delegate-option-title {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.delegate-option-subtitle {
+  display: block;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.approval-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  margin-top: var(--space-2);
+  background: var(--bg-tertiary);
+}
+
+.approval-item-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.approval-item-title {
+  font-weight: 700;
+}
+
+.approval-item-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-top: var(--space-2);
+}
+
+.approval-item-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.approval-action {
+  flex: 1;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.approval-action.is-reject {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
 }
 /* Icon Picker Popover */
 .icon-picker-popover {

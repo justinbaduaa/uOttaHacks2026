@@ -84,12 +84,9 @@ def extract_file_s3_keys_from_nodes(nodes: List[Dict]) -> List[str]:
                 s3_keys.append(item["s3Key"])
 
         # Check evidence files
-        evidence = node.get("evidence", [])
-        evidence_items = []
-        if isinstance(evidence, list):
-            evidence_items = evidence
-        elif isinstance(evidence, dict):
-            evidence_items = evidence.get("files", [])
+        evidence_items = node.get("evidence", []) or []
+        if isinstance(evidence_items, dict):
+            evidence_items = evidence_items.get("files", [])
         for item in evidence_items:
             if item.get("type") == "file" and item.get("s3Key"):
                 s3_keys.append(item["s3Key"])

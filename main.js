@@ -1,22 +1,25 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const crypto = require("crypto");
 const http = require("http");
+const https = require("https");
 const path = require("path");
 
 if (process.platform === "darwin") {
   app.name = "GlassBox";
 }
 
-const COGNITO_DOMAIN = "https://glassbox-244271315858-us-east-1.auth.us-east-1.amazoncognito.com";
-const COGNITO_CLIENT_ID = "6260nb86n0snfo7ej0edmc1thj";
+const COGNITO_DOMAIN = "https://glassbox-846532307761-us-east-1.auth.us-east-1.amazoncognito.com";
+const COGNITO_CLIENT_ID = "3pmncf4qmok3oa6e7otpk17j0e";
 const COGNITO_REDIRECT_URI = "http://localhost:8787/callback";
 const COGNITO_SCOPES = "openid email profile";
-const API_BASE_URL = "https://jwsg89orxe.execute-api.us-east-1.amazonaws.com";
+const API_BASE_URL = "https://58icbv6e7h.execute-api.us-east-1.amazonaws.com";
 const API_TIMEOUT_MS = 15000;
+const GATEWAY_BASE_URL = process.env.GATEWAY_BASE_URL || "http://13.218.40.115:8001";
 
 let mainWindow;
 let authWindow;
 let authInFlight;
+const gatewayStreams = new Map();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -269,6 +272,126 @@ async function apiRequest({ path, method = "GET", body, token }) {
   return payload.data;
 }
 
+function buildGatewayStreamUrl(canvasId, nodeId, since) {
+  const url = new URL("/stream", GATEWAY_BASE_URL);
+  url.searchParams.set("canvasId", canvasId);
+  url.searchParams.set("nodeId", nodeId);
+  if (since) {
+    url.searchParams.set("since", since);
+  }
+  return url;
+}
+
+function stopGatewayStream(streamKey) {
+  const existing = gatewayStreams.get(streamKey);
+  if (existing) {
+    existing.request.destroy();
+    gatewayStreams.delete(streamKey);
+  }
+}
+
+function startGatewayStream({ canvasId, nodeId, token, since }) {
+  if (!canvasId || !nodeId) {
+    throw new Error("canvasId and nodeId are required");
+  }
+  const streamKey = `${canvasId}:${nodeId}`;
+  stopGatewayStream(streamKey);
+
+  const url = buildGatewayStreamUrl(canvasId, nodeId, since);
+  const isSecure = url.protocol === "https:";
+  const client = isSecure ? https : http;
+
+  const headers = {
+    Accept: "text/event-stream",
+  };
+  if (token) {
+    headers.Authorization = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
+  }
+
+  const request = client.request(
+    url,
+    {
+      method: "GET",
+      headers,
+    },
+    (response) => {
+      response.setEncoding("utf8");
+      let buffer = "";
+
+      response.on("data", (chunk) => {
+        buffer += chunk;
+        let index = buffer.indexOf("\n\n");
+        while (index !== -1) {
+          const raw = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          const lines = raw.split(/\r?\n/);
+          let eventName = "";
+          const dataLines = [];
+          lines.forEach((line) => {
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+              return;
+            }
+            if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trim());
+            }
+          });
+          if (!dataLines.length) {
+            index = buffer.indexOf("\n\n");
+            return;
+          }
+          const dataRaw = dataLines.join("\n");
+          let parsed = dataRaw;
+          try {
+            parsed = JSON.parse(dataRaw);
+          } catch (error) {
+            parsed = dataRaw;
+          }
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("gateway-stream-event", {
+              canvasId,
+              nodeId,
+              event: eventName || "message",
+              data: parsed,
+            });
+          }
+          index = buffer.indexOf("\n\n");
+        }
+      });
+
+      response.on("end", () => {
+        gatewayStreams.delete(streamKey);
+      });
+
+      response.on("error", (error) => {
+        gatewayStreams.delete(streamKey);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("gateway-stream-error", {
+            canvasId,
+            nodeId,
+            error: error.message || "Gateway stream error",
+          });
+        }
+      });
+    }
+  );
+
+  request.on("error", (error) => {
+    gatewayStreams.delete(streamKey);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("gateway-stream-error", {
+        canvasId,
+        nodeId,
+        error: error.message || "Gateway stream error",
+      });
+    }
+  });
+
+  request.end();
+  gatewayStreams.set(streamKey, { request });
+  return { ok: true, streamKey };
+}
+
 ipcMain.handle("api-list-canvases", async (event, token) => {
   return apiRequest({ path: "/canvases", method: "GET", token });
 });
@@ -412,6 +535,40 @@ ipcMain.handle("api-download-file", async (event, { token, payload }) => {
   return apiRequest({ path: "/files/download", method: "POST", token, body });
 });
 
+ipcMain.handle("api-execute-node", async (event, { token, nodeId, payload }) => {
+  if (!nodeId) {
+    throw new Error("Missing nodeId");
+  }
+  if (!payload?.canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  const body = {
+    canvasId: payload.canvasId,
+  };
+  if (payload.approvalMode) {
+    body.approvalMode = payload.approvalMode;
+  }
+  return apiRequest({ path: `/nodes/${nodeId}/execute`, method: "POST", token, body });
+});
+
+ipcMain.handle("api-approve-node-action", async (event, { token, nodeId, payload }) => {
+  if (!nodeId) {
+    throw new Error("Missing nodeId");
+  }
+  if (!payload?.canvasId) {
+    throw new Error("Missing canvasId");
+  }
+  const body = {
+    canvasId: payload.canvasId,
+    approvalId: payload.approvalId,
+    decision: payload.decision,
+  };
+  if (payload.reason) {
+    body.reason = payload.reason;
+  }
+  return apiRequest({ path: `/nodes/${nodeId}/approve`, method: "POST", token, body });
+});
+
 ipcMain.handle("api-leave-presence", async (event, { token, canvasId }) => {
   if (!canvasId) {
     throw new Error("Missing canvasId");
@@ -435,5 +592,18 @@ ipcMain.handle("api-upload-s3", async (event, { url, contentType, data }) => {
     const text = await response.text().catch(() => "");
     throw new Error(`S3 upload failed (${response.status}) ${text}`.trim());
   }
+  return { ok: true };
+});
+
+ipcMain.handle("gateway-stream-start", async (event, payload) => {
+  return startGatewayStream(payload || {});
+});
+
+ipcMain.handle("gateway-stream-stop", async (event, payload) => {
+  if (!payload?.canvasId || !payload?.nodeId) {
+    return { ok: false };
+  }
+  const streamKey = `${payload.canvasId}:${payload.nodeId}`;
+  stopGatewayStream(streamKey);
   return { ok: true };
 });

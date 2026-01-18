@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 from .response import error_response, internal_error_response
 from .validation import normalize_evidence
@@ -298,7 +298,7 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Transform DynamoDB node item to API format."""
     evidence, evidence_error = normalize_evidence(item.get("evidence"))
     if evidence_error:
-        evidence = {"notes": [], "files": []}
+        evidence = []
     position_x = item.get("x")
     position_y = item.get("y")
     return {

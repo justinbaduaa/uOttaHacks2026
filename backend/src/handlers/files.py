@@ -9,7 +9,6 @@ from lib.dynamodb import get_canvas_table, get_node, get_nodes_table, require_me
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
 from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
-from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
 from lib.validation import (
     parse_body,
     validate_canvas_id,
@@ -19,6 +18,17 @@ from lib.validation import (
 )
 
 logger = get_logger(__name__)
+
+
+def _find_file_item(candidates, file_id, s3_key):
+    for item in candidates:
+        if item.get("type") != "file":
+            continue
+        if file_id and item.get("fileId") == file_id:
+            return item
+        if s3_key and item.get("s3Key") == s3_key:
+            return item
+    return None
 
 
 def presign_file(event, context):
@@ -292,9 +302,8 @@ def complete_file(event, context):
             evidence, evidence_error = normalize_evidence(meta_item.get("evidence"))
             if evidence_error:
                 return error_response(code="INVALID_REQUEST", message=evidence_error)
-            evidence_files = evidence.get("files", [])
-            evidence_files.append(file_item)
-            evidence["files"] = evidence_files
+            evidence_items = list(evidence)
+            evidence_items.append(file_item)
 
             response = table.update_item(
                 Key={
@@ -303,7 +312,7 @@ def complete_file(event, context):
                 },
                 UpdateExpression="SET evidence = :evidence, updatedAt = :now",
                 ExpressionAttributeValues={
-                    ":evidence": evidence,
+                    ":evidence": evidence_items,
                     ":now": now,
                 },
                 ReturnValues="ALL_NEW",
@@ -337,11 +346,10 @@ def complete_file(event, context):
             evidence, evidence_error = normalize_evidence(node.get("evidence"))
             if evidence_error:
                 return error_response(code="INVALID_REQUEST", message=evidence_error)
-            evidence_files = evidence.get("files", [])
-            evidence_files.append(file_item)
-            evidence["files"] = evidence_files
+            evidence_items = list(evidence)
+            evidence_items.append(file_item)
             update_expression = "SET evidence = :evidence, updatedAt = :now, authorSub = :authorSub, GSI1SK = :gsi1sk"
-            expression_attribute_values[":evidence"] = evidence
+            expression_attribute_values[":evidence"] = evidence_items
         else:
             # Get current inputs/outputs list
             current_items = node.get(slot, []).copy()
@@ -466,9 +474,10 @@ def download_file(event, context):
 
             candidates.extend(node.get("inputs", []))
             candidates.extend(node.get("outputs", []))
-            evidence = node.get("evidence")
-            if isinstance(evidence, dict):
-                candidates.extend(evidence.get("files", []))
+            evidence_items, evidence_error = normalize_evidence(node.get("evidence"))
+            if evidence_error:
+                return error_response(code="INVALID_REQUEST", message=evidence_error)
+            candidates.extend(evidence_items)
         else:
             table = get_canvas_table()
             response = table.get_item(
@@ -484,21 +493,12 @@ def download_file(event, context):
                     message="Canvas not found",
                     status_code=404,
                 )
-            evidence, evidence_error = normalize_evidence(item.get("evidence"))
+            evidence_items, evidence_error = normalize_evidence(item.get("evidence"))
             if evidence_error:
-                evidence = {"notes": [], "files": []}
-            candidates.extend(evidence.get("files", []))
+                evidence_items = []
+            candidates.extend(evidence_items)
 
-        matched = None
-        for item in candidates:
-            if item.get("type") != "file":
-                continue
-            if file_id and item.get("fileId") == file_id:
-                matched = item
-                break
-            if s3_key and item.get("s3Key") == s3_key:
-                matched = item
-                break
+        matched = _find_file_item(candidates, file_id, s3_key)
 
         if not matched:
             return error_response(
@@ -527,3 +527,118 @@ def download_file(event, context):
     except Exception as e:
         logger.error(f"Error generating download URL: {str(e)}", exc_info=True)
         return internal_error_response("Failed to generate download URL")
+
+
+def presign_download(event, context):
+    """POST /files/presign-download - Generate a presigned URL for file download."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        body, parse_error = parse_body(event)
+        if parse_error:
+            return parse_error
+
+        canvas_id = body.get("canvasId")
+        if not canvas_id:
+            return error_response(code="INVALID_REQUEST", message="canvasId is required")
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        scope = body.get("scope") or "node"
+        if scope not in ["node", "canvas"]:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="scope must be 'node' or 'canvas'",
+            )
+
+        file_id = body.get("fileId")
+        s3_key = body.get("s3Key")
+        if not file_id and not s3_key:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="fileId or s3Key is required",
+            )
+
+        candidates = []
+        if scope == "node":
+            node_id = body.get("nodeId")
+            if not node_id:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="nodeId is required",
+                )
+
+            valid, error_msg = validate_node_id(node_id)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+            node = get_node(canvas_id, node_id)
+            if not node:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Node not found",
+                    status_code=404,
+                )
+
+            candidates.extend(node.get("inputs", []))
+            candidates.extend(node.get("outputs", []))
+            evidence_items, evidence_error = normalize_evidence(node.get("evidence"))
+            if evidence_error:
+                return error_response(code="INVALID_REQUEST", message=evidence_error)
+            candidates.extend(evidence_items)
+        else:
+            table = get_canvas_table()
+            response = table.get_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                }
+            )
+            item = response.get("Item")
+            if not item:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Canvas not found",
+                    status_code=404,
+                )
+            evidence_items, evidence_error = normalize_evidence(item.get("evidence"))
+            if evidence_error:
+                evidence_items = []
+            candidates.extend(evidence_items)
+
+        matched = _find_file_item(candidates, file_id, s3_key)
+        if not matched:
+            return error_response(
+                code="NOT_FOUND",
+                message="File not found on node",
+                status_code=404,
+            )
+
+        resolved_key = matched.get("s3Key")
+        if not resolved_key:
+            return internal_error_response("Missing s3Key for file")
+
+        download_url = generate_presigned_get_url(resolved_key)
+        if not download_url:
+            return internal_error_response("Failed to generate presigned URL")
+
+        return success_response({
+            "fileId": matched.get("fileId"),
+            "s3Key": resolved_key,
+            "filename": matched.get("filename"),
+            "contentType": matched.get("contentType"),
+            "downloadUrl": download_url,
+            "expiresInSeconds": 3600,
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating presigned download URL: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to generate presigned download URL")

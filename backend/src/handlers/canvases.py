@@ -235,7 +235,7 @@ def get_canvas_evidence(event, context):
 
         evidence, evidence_error = normalize_evidence(item.get("evidence"))
         if evidence_error:
-            evidence = {"notes": [], "files": []}
+            evidence = []
 
         return success_response({
             "canvasId": canvas_id,

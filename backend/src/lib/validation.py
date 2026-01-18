@@ -91,9 +91,6 @@ def validate_file_slot(slot: str) -> Tuple[bool, Optional[str]]:
     """Validate file slot is either 'inputs', 'outputs', or 'evidence'."""
     if slot not in ["inputs", "outputs", "evidence"]:
         return False, "slot must be one of: inputs, outputs, evidence"
-    """Validate file slot is either 'inputs', 'outputs', or 'evidence'."""
-    if slot not in ["inputs", "outputs", "evidence"]:
-        return False, "slot must be one of: inputs, outputs, evidence"
     return True, None
 
 
@@ -224,12 +221,15 @@ def validate_approval_decision(decision: Any) -> Tuple[bool, Optional[str]]:
 def normalize_evidence(evidence: Any) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
     """
     Normalize and validate evidence payload.
-    
-    Evidence format:
+
+    Evidence format (canonical):
       [
-        { "type": "text", "text": "..." },
-        { "type": "file", "fileId": "...", "s3Key": "...", "filename": "..." }
+        { "type": "text", "text": "...", ... },
+        { "type": "file", "fileId": "...", "s3Key": "...", "filename": "...", ... }
       ]
+
+    Backward compatible with:
+      { "notes": [...], "files": [...] }
     """
     if evidence is None:
         return [], None
@@ -283,12 +283,20 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[List[Dict[str, Any]]], O
         return None, "evidence.files must be an array"
 
     normalized: List[Dict[str, Any]] = []
-    for note in notes:
-        normalized.append({"type": "text", "text": note})
+    for note in normalized_notes:
+        item = {
+            "type": "text",
+            "text": note.get("text", ""),
+        }
+        if note.get("noteId"):
+            item["noteId"] = note.get("noteId")
+        if note.get("createdAt"):
+            item["createdAt"] = note.get("createdAt")
+        normalized.append(item)
     for item in files:
         valid, error = validate_io_item(item)
         if not valid:
             return None, f"evidence.files: {error}"
         normalized.append(item)
 
-    return {"notes": normalized_notes, "files": files}, None
+    return normalized, None

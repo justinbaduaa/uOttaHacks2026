@@ -16,7 +16,13 @@ contextBridge.exposeInMainWorld('glassBox', {
     presignFile: (token, payload) => ipcRenderer.invoke('api-presign-file', { token, payload }),
     completeFile: (token, payload) => ipcRenderer.invoke('api-complete-file', { token, payload }),
     downloadFile: (token, payload) => ipcRenderer.invoke('api-download-file', { token, payload }),
+    executeNode: (token, nodeId, payload) => ipcRenderer.invoke('api-execute-node', { token, nodeId, payload }),
+    approveNodeAction: (token, nodeId, payload) => ipcRenderer.invoke('api-approve-node-action', { token, nodeId, payload }),
     leavePresence: (token, canvasId) => ipcRenderer.invoke('api-leave-presence', { token, canvasId }),
     uploadToS3: (url, contentType, data) => ipcRenderer.invoke('api-upload-s3', { url, contentType, data }),
+    startGatewayStream: (payload) => ipcRenderer.invoke('gateway-stream-start', payload),
+    stopGatewayStream: (payload) => ipcRenderer.invoke('gateway-stream-stop', payload),
+    onGatewayStreamEvent: (handler) => ipcRenderer.on('gateway-stream-event', (_event, data) => handler(data)),
+    onGatewayStreamError: (handler) => ipcRenderer.on('gateway-stream-error', (_event, data) => handler(data)),
   },
 });

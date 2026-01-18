@@ -7,7 +7,7 @@ s3_prefix = "sam-backend-glassbox"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
-parameter_overrides = "GatewayApiBaseUrl=\"\" GatewaySharedSecret=\"\""
+parameter_overrides = "GatewayApiBaseUrl=\"http://13.218.40.115:8001\" GatewaySharedSecret=\"\""
 
 [default.global.parameters]
 region = "us-east-1"
