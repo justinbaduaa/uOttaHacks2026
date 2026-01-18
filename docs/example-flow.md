@@ -12,7 +12,8 @@ subtask if a deeper policy review is needed.
 
 In this system, an RFI is just a structured input package (text/link/file) that
 the agent must answer. The response and supporting files are attached as evidence
-on the node.
+on the node. The RFI input itself stays in `inputs[]` unless you explicitly copy
+it into evidence.
 
 ## Human-In-The-Loop Mode
 We set `approvalMode=approve_nodes`, which means:
@@ -116,9 +117,9 @@ Human approves, gateway marks node `completed`.
 ## What Gets Produced
 - **Outputs**: e.g. `SecurityReview_VendorX.md` (S3 file in `node.outputs[]`).
 - **Evidence**:
-  - `RFI-2026-0147.pdf` (original RFI file, if placed in evidence).
   - Yellowcake findings as text evidence.
   - Any supporting files with `evidence__` prefix.
+  - Activity log snapshot (attached automatically on completion).
 - **Activity Log**:
   - Status updates from the agent.
   - Approval request entries and decisions.

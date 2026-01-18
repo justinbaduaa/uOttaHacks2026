@@ -734,7 +734,20 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "status": payload.get("status") or "draft",
         }
 
-        await self._backend_create_node(auth_token, body)
+        created = await self._backend_create_node(auth_token, body)
+        child_node_id = created.get("nodeId")
+        if child_node_id:
+            await self._append_item_to_node(
+                canvas_id,
+                node_id,
+                auth_token,
+                "evidence",
+                {
+                    "type": "node",
+                    "nodeId": child_node_id,
+                    "include": "all",
+                },
+            )
         log_entry = self._build_log_entry(
             entry_type="action",
             message=f"Created subnode: {title}",
@@ -751,6 +764,19 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if summary:
             evidence.append({"type": "text", "text": summary})
 
+        if summary:
+            await self._update_node(
+                canvas_id,
+                node_id,
+                auth_token,
+                {"evidence": evidence},
+            )
+
+        if node.get("assignedTo", {}).get("type") == "agent":
+            await self._attach_activity_log_evidence(canvas_id, node_id, auth_token)
+
+        node_after = await self._backend_get_node(canvas_id, node_id, auth_token)
+        evidence = node_after.get("evidence", [])
         if not evidence and node.get("assignedTo", {}).get("type") == "agent":
             log_entry = self._build_log_entry(
                 entry_type="status",
@@ -766,7 +792,6 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             auth_token,
             {
                 "status": "completed",
-                "evidence": evidence,
                 "activeTaskId": None,
             },
         )
@@ -1099,6 +1124,45 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         }
         await self._backend_complete_file(
             canvas_id, node_id, auth_token, slot, file_item
+        )
+
+    async def _attach_activity_log_evidence(
+        self, canvas_id: str, node_id: str, auth_token: str
+    ) -> None:
+        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        filename = f"evidence__activity_log_{node_id}.json"
+        for item in node.get("evidence", []):
+            if item.get("type") == "file" and item.get("filename") == filename:
+                return
+
+        activity_log = node.get("activityLog", [])
+        payload = {
+            "canvasId": canvas_id,
+            "nodeId": node_id,
+            "activityLog": activity_log,
+        }
+        content_bytes = json.dumps(payload, indent=2, ensure_ascii=True).encode("utf-8")
+        content_type = "application/json"
+
+        presign = await self._backend_presign_file(
+            canvas_id, node_id, auth_token, "evidence", filename, content_type
+        )
+        upload_url = presign.get("uploadUrl")
+        if not upload_url:
+            raise BackendError("Missing presigned upload URL for activity log")
+
+        await asyncio.to_thread(
+            self._upload_bytes_to_url, upload_url, content_bytes, content_type
+        )
+
+        file_item = {
+            "fileId": presign.get("fileId"),
+            "s3Key": presign.get("s3Key"),
+            "filename": filename,
+            "contentType": content_type,
+        }
+        await self._backend_complete_file(
+            canvas_id, node_id, auth_token, "evidence", file_item
         )
 
     def _upload_bytes_to_url(self, upload_url: str, file_bytes: bytes, content_type: str) -> None:

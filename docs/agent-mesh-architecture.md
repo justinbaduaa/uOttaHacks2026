@@ -137,6 +137,7 @@ The gateway is the only component that mutates backend state.
 ## Activity Log
 - Node field `activityLog[]` records status updates, actions, approvals, artifacts, and errors.
 - Used for streaming and auditability.
+- On agent completion, the gateway attaches an activity log snapshot as evidence (`evidence__activity_log_<nodeId>.json`).
 
 ## Deployment Model
 - **Local dev**: `SOLACE_DEV_MODE=true` and `sam run` inside `agent-mesh/`.
