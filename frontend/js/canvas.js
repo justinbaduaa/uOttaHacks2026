@@ -103,6 +103,8 @@ const Canvas = {
     nodesById: {},
     childrenByParent: {},
     lastSyncByCanvas: {},
+    activeUsers: [],
+    activeUsersKey: '',
     isLoadingCanvases: false,
     isLoadingNodes: false,
     isCreatingCanvas: false,
@@ -122,14 +124,14 @@ const Canvas = {
   pollIntervalMs: 7000,
   pollTimer: null,
   pollInFlight: false,
+  presenceMaxVisible: 5,
 
   init() {
     this.container = document.getElementById('canvasContainer');
     this.canvas = document.getElementById('canvas');
     this.sidebarList = document.getElementById('sidebarBoxesList');
     this.breadcrumb = document.getElementById('breadcrumb');
-    this.profileButton = document.getElementById('userProfile');
-    this.profileLetter = document.getElementById('userProfileLetter');
+    this.presenceStack = document.getElementById('presenceStack');
     this.canvasLoading = document.getElementById('canvasLoading');
     this.canvasActions = document.querySelector('.canvas-actions');
     this.canvasCreateToggle = document.getElementById('canvasCreateToggle');
@@ -431,6 +433,7 @@ const Canvas = {
     this.currentPath = [];
     this.renderSidebar();
     this.updateBreadcrumb();
+    this.setActiveUsers([]);
     this.closeCodePanel();
     this.updateCodePanel();
     await this.loadNodesForCanvas(canvasId);
@@ -446,7 +449,9 @@ const Canvas = {
 
     try {
       console.log('[Canvas] Loading nodes for canvas', canvasId);
-      const nodes = await Api.listNodes(canvasId);
+      const payload = await Api.listNodes(canvasId);
+      const { nodes, activeUsers } = this.normalizeNodesPayload(payload);
+      this.setActiveUsers(activeUsers);
       console.log('[Canvas] Loaded nodes', Array.isArray(nodes) ? nodes.length : nodes);
       const normalized = (nodes || [])
         .filter(node => !node.deletedAt)
@@ -461,6 +466,7 @@ const Canvas = {
     } catch (error) {
       console.error('[Canvas] Failed to load nodes', error);
       this.state.nodes = [];
+      this.setActiveUsers([]);
       this.buildNodeIndex();
       this.renderNodes([]);
       this.canvas.innerHTML = `
@@ -685,6 +691,145 @@ const Canvas = {
     this.canvasCodeHint.textContent = 'Code unavailable for this canvas.';
   },
 
+  normalizeNodesPayload(payload) {
+    if (Array.isArray(payload)) {
+      return { nodes: payload, activeUsers: [] };
+    }
+    if (payload && Array.isArray(payload.nodes)) {
+      return {
+        nodes: payload.nodes,
+        activeUsers: payload.activeUsers || payload.presence || payload.active_users || [],
+      };
+    }
+    return { nodes: [], activeUsers: [] };
+  },
+
+  setActiveUsers(users) {
+    const normalized = this.normalizeActiveUsers(users);
+    const key = normalized.map(user => `${user.userId}:${user.displayName}:${user.lastActiveAt}`).join('|');
+    if (key === this.state.activeUsersKey) {
+      return;
+    }
+    this.state.activeUsers = normalized;
+    this.state.activeUsersKey = key;
+    this.renderPresence();
+  },
+
+  normalizeActiveUsers(users) {
+    if (!Array.isArray(users)) {
+      return [];
+    }
+    const currentUser = this.getCurrentUserProfile();
+    const seen = new Set();
+    const result = [];
+
+    users.forEach((user) => {
+      if (!user) return;
+      const userId = String(user.userId || user.sub || user.id || '').trim();
+      if (!userId || userId === currentUser.userId || seen.has(userId)) {
+        return;
+      }
+      const displayName = String(
+        user.displayName || user.name || user.email || `User ${userId.slice(-4)}`
+      );
+      const initial = String(user.initial || this.getInitials(displayName) || '?');
+      const lastActiveAt = user.lastActiveAt || '';
+      result.push({
+        userId,
+        displayName,
+        initial,
+        lastActiveAt,
+      });
+      seen.add(userId);
+    });
+
+    return result.sort((a, b) => {
+      const aTime = a.lastActiveAt ? Date.parse(a.lastActiveAt) : 0;
+      const bTime = b.lastActiveAt ? Date.parse(b.lastActiveAt) : 0;
+      return aTime - bTime;
+    });
+  },
+
+  renderPresence() {
+    if (!this.presenceStack) return;
+    const currentUser = this.getCurrentUserProfile();
+    const maxVisible = Math.max(2, this.presenceMaxVisible);
+    const maxOthers = maxVisible - 1;
+    let visibleOthers = this.state.activeUsers.slice(0, maxOthers);
+    let extraCount = this.state.activeUsers.length - maxOthers;
+
+    if (extraCount > 0) {
+      visibleOthers = this.state.activeUsers.slice(0, Math.max(1, maxOthers - 1));
+      extraCount = this.state.activeUsers.length - visibleOthers.length;
+    } else {
+      extraCount = 0;
+    }
+
+    const displayUsers = [...visibleOthers];
+    if (extraCount > 0) {
+      displayUsers.push({ type: 'more', count: extraCount });
+    }
+    displayUsers.push({ ...currentUser, isMe: true });
+
+    const fragment = document.createDocumentFragment();
+    displayUsers.forEach((user, index) => {
+      const isMore = user.type === 'more';
+      const element = document.createElement(isMore ? 'div' : 'button');
+      element.className = `profile-chip presence-avatar${isMore ? ' is-more' : ''}${user.isMe ? ' is-me' : ''}`;
+      element.style.zIndex = String(index + 1);
+
+      if (isMore) {
+        element.textContent = `+${user.count}`;
+        element.title = `${user.count} more collaborators`;
+      } else {
+        element.textContent = user.initial || '?';
+        element.title = user.displayName || 'User';
+        element.style.background = this.getAvatarGradient(user.userId, user.isMe);
+      }
+
+      if (element.tagName === 'BUTTON') {
+        element.type = 'button';
+        element.setAttribute('aria-label', element.title);
+      }
+
+      fragment.appendChild(element);
+    });
+
+    this.presenceStack.innerHTML = '';
+    this.presenceStack.appendChild(fragment);
+  },
+
+  getCurrentUserProfile() {
+    const payload = Auth.token ? parseJwt(Auth.token) : null;
+    const userId = payload && payload.sub ? String(payload.sub) : 'me';
+    const email = payload && payload.email ? String(payload.email) : '';
+    const username = payload && (payload['cognito:username'] || payload.username)
+      ? String(payload['cognito:username'] || payload.username)
+      : '';
+    const displayName = email || username || `User ${userId.slice(-4)}`;
+    const initial = this.getInitials(displayName);
+
+    return { userId, displayName, initial };
+  },
+
+  getAvatarGradient(userId, isMe) {
+    if (isMe) {
+      return 'linear-gradient(135deg, #8B5CF6, #EC4899)';
+    }
+    const gradients = [
+      'linear-gradient(135deg, #22A47F, #6EE7B7)',
+      'linear-gradient(135deg, #60A5FA, #38BDF8)',
+      'linear-gradient(135deg, #F59E0B, #FBBF24)',
+      'linear-gradient(135deg, #F472B6, #FB7185)',
+      'linear-gradient(135deg, #A5B4FC, #818CF8)',
+    ];
+    let hash = 0;
+    for (let i = 0; i < userId.length; i += 1) {
+      hash = (hash * 31 + userId.charCodeAt(i)) % gradients.length;
+    }
+    return gradients[hash];
+  },
+
   startPolling() {
     this.stopPolling();
     if (!this.state.selectedCanvasId || !Api.getAuthToken()) {
@@ -717,7 +862,9 @@ const Canvas = {
     this.pollInFlight = true;
     try {
       const updatedSince = this.getUpdatedSinceForPoll(canvasId);
-      const nodes = await Api.listNodes(canvasId, updatedSince);
+      const payload = await Api.listNodes(canvasId, updatedSince);
+      const { nodes, activeUsers } = this.normalizeNodesPayload(payload);
+      this.setActiveUsers(activeUsers);
       if (!Array.isArray(nodes) || nodes.length === 0) {
         return;
       }
@@ -1317,14 +1464,7 @@ const Canvas = {
   },
 
   updateProfile() {
-    if (!this.profileLetter) return;
-    const payload = Auth.token ? parseJwt(Auth.token) : null;
-    const email = payload && payload.email ? String(payload.email) : '';
-    const letter = email ? email[0].toUpperCase() : '?';
-    this.profileLetter.textContent = letter;
-    if (this.profileButton && email) {
-      this.profileButton.title = email;
-    }
+    this.renderPresence();
   }
 };
 

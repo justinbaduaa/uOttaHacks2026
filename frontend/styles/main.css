@@ -623,6 +623,13 @@ html, body {
   gap: var(--space-3);
 }
 
+.presence-stack {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 2px;
+}
+
 .profile-chip {
   width: 32px;
   height: 32px;
@@ -639,6 +646,27 @@ html, body {
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.presence-avatar {
+  position: relative;
+  margin-left: -12px;
+  border: 2px solid var(--bg-secondary);
+}
+
+.presence-avatar:first-child {
+  margin-left: 0;
+}
+
+.presence-avatar:hover {
+  transform: none;
+}
+
+.presence-avatar.is-more {
+  background: var(--sidebar-hover);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  cursor: default;
 }
 
 .profile-chip:hover {
