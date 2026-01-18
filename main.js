@@ -3,8 +3,6 @@ const path = require("path");
 
 let mainWindow;
 
-const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -21,13 +19,12 @@ function createWindow() {
     backgroundColor: "#F5F7FA",
   });
 
-  // In development, load from Vite dev server
-  if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
+  // Load directly from frontend folder
+  mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
+
+  // Open DevTools in development
+  if (process.argv.includes("--dev")) {
     mainWindow.webContents.openDevTools();
-  } else {
-    // In production, load built files
-    mainWindow.loadFile(path.join(__dirname, "frontend", "dist", "index.html"));
   }
 
   mainWindow.on("closed", () => {

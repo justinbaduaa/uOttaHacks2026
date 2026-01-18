@@ -15,7 +15,7 @@ const Sidebar = ({ onNodeSelect, selectedNodeId }) => {
           <span className="control control-maximize"></span>
         </div>
         <div className="logo">
-          <img src="./glassbox logo.png" alt="glassbox" className="logo-icon" />
+          <img src="/glassbox logo.png" alt="glassbox" className="logo-icon" />
           <span className="logo-text">glassbox</span>
         </div>
       </div>
