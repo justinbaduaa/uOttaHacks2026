@@ -1156,6 +1156,7 @@ const Canvas = {
     const iconName = nodeData.icon || 'box';
     const inputs = nodeData.inputs || [];
     const evidenceFiles = (nodeData.evidence || []).filter(item => item.type === 'file');
+    const outputs = nodeData.outputs || [];
     // If no inputs (new node), showing some mocks provided by user request or keep empty
     // The user request said "drop in it... add a number of resources... dropdown to view"
     // So we start empty or with existing data.
@@ -1238,12 +1239,27 @@ const Canvas = {
         <div class="node-output">
           <div class="node-output-header">
             <span class="output-icon"><i data-lucide="play"></i></span>
-            <span class="output-title">Output</span>
+            <span class="output-title">Output (${outputs.length})</span>
+            <button class="output-list-toggle" aria-label="Toggle Outputs" ${outputs.length === 0 ? 'disabled' : ''}>
+               <i data-lucide="chevron-down"></i>
+            </button>
           </div>
-          <p class="node-output-description">Create filtered views that you can save and share with others</p>
-          <div class="node-output-actions">
-            <button class="output-open-btn">Open views</button>
-            <a class="output-learn-more">Learn more ›</a>
+          <p class="node-output-description">${this.escapeHtml(nodeData.outputDescription || 'Explain what was done')}</p>
+          
+          <div class="output-list-container" style="display: none;">
+             <div class="output-list">
+                ${outputs.map(output => `
+                  <div class="output-item">
+                    <span class="output-item-icon"><i data-lucide="${this.escapeHtml(output.icon || 'file')}"></i></span>
+                    <span class="output-item-text">${this.escapeHtml(output.name)}</span>
+                  </div>
+                `).join('')}
+             </div>
+          </div>
+
+          <div class="drop-zone output-drop-zone">
+             <i data-lucide="upload-cloud"></i>
+             <span>Drop files here</span>
           </div>
         </div>
       </div>
@@ -1256,7 +1272,6 @@ const Canvas = {
     // 1. Icon Trigger
     const iconBtn = element.querySelector('.node-icon-trigger');
     if (iconBtn) {
-       console.log('Attaching icon listener');
        iconBtn.addEventListener('mousedown', (e) => e.stopPropagation());
        iconBtn.addEventListener('click', (e) => {
          e.stopPropagation();
@@ -1276,8 +1291,8 @@ const Canvas = {
        navBtn.addEventListener('dblclick', (e) => e.stopPropagation());
     }
 
-    // 3. Drop Zone
-    const dropZone = element.querySelector('.drop-zone');
+    // 3. Drop Zone (Input)
+    const dropZone = element.querySelector('.drop-zone:not(.output-drop-zone)');
     const inputListContainer = element.querySelector('.input-list-container');
     const inputList = element.querySelector('.input-list');
     const inputToggle = element.querySelector('.input-list-toggle');
@@ -1301,8 +1316,7 @@ const Canvas = {
         dropZone.classList.remove('drag-over');
         this.handleNodeDrop(e, nodeData, inputList, inputToggle, inputTitle, fileCountText);
       });
-       // Prevent drag start on the drop zone itself from moving the node
-       dropZone.addEventListener('mousedown', (e) => e.stopPropagation());
+      dropZone.addEventListener('mousedown', (e) => e.stopPropagation());
     }
 
     // 4. Input Toggle
@@ -1324,6 +1338,42 @@ const Canvas = {
         const s3Key = item.dataset.s3Key || '';
         this.downloadNodeFile(nodeData, { fileId, s3Key });
       });
+    // 5. Drop Zone (Output)
+    const outputDropZone = element.querySelector('.output-drop-zone');
+    const outputListContainer = element.querySelector('.output-list-container');
+    const outputList = element.querySelector('.output-list');
+    const outputToggle = element.querySelector('.output-list-toggle');
+    const outputTitle = element.querySelector('.output-title');
+
+    if (outputDropZone) {
+      outputDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.add('drag-over');
+      });
+      outputDropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.remove('drag-over');
+      });
+      outputDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.remove('drag-over');
+        this.handleNodeOutputDrop(e, nodeData, outputList, outputToggle, outputTitle);
+      });
+      outputDropZone.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    // 6. Output Toggle
+    if (outputToggle) {
+       outputToggle.addEventListener('mousedown', (e) => e.stopPropagation());
+       outputToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isHidden = outputListContainer.style.display === 'none';
+          outputListContainer.style.display = isHidden ? 'block' : 'none';
+          outputToggle.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+       });
     }
 
 
@@ -1388,6 +1438,13 @@ const Canvas = {
         allowEmpty: true,
         value: nodeData.goal || '',
       },
+      {
+         el: element.querySelector('.node-output-description'),
+         field: 'outputDescription',
+         placeholder: 'Explain what was done',
+         allowEmpty: true,
+         value: nodeData.outputDescription || '',
+      }
     ];
 
     config.forEach(({ el, field, placeholder, allowEmpty, value }) => {
@@ -1484,9 +1541,12 @@ const Canvas = {
     if (element.dataset.field === 'title') {
       updates.name = newValue;
       apiUpdates.title = newValue;
-    } else {
+    } else if (element.dataset.field === 'description') {
       updates.goal = newValue;
       apiUpdates.description = newValue;
+    } else if (element.dataset.field === 'outputDescription') {
+      updates.outputDescription = newValue;
+      apiUpdates.outputDescription = newValue;
     }
 
     this.saveNodeField(nodeData, updates, apiUpdates, element, originalValue);
@@ -1512,8 +1572,11 @@ const Canvas = {
       if (updates.goal !== undefined && updated && Object.prototype.hasOwnProperty.call(updated, 'description')) {
         resolvedUpdates.goal = updated.description || '';
       }
+      if (updates.outputDescription !== undefined && updated && Object.prototype.hasOwnProperty.call(updated, 'outputDescription')) {
+         resolvedUpdates.outputDescription = updated.outputDescription || '';
+      }
 
-      const finalValue = resolvedUpdates.name ?? resolvedUpdates.goal ?? '';
+      const finalValue = resolvedUpdates.name ?? resolvedUpdates.goal ?? resolvedUpdates.outputDescription ?? '';
       element.dataset.originalValue = finalValue;
       element.textContent = finalValue;
       element.classList.remove('is-saving');
@@ -1835,6 +1898,47 @@ const Canvas = {
       console.error('[Canvas] File download failed', error);
       this.showCanvasToast(error.message || 'Failed to download file.', 'error');
     }
+  handleNodeOutputDrop(e, nodeData, listContainer, toggleBtn, titleEl) {
+    let files = [];
+    if (e.dataTransfer.items) {
+      files = [...e.dataTransfer.items].filter(item => item.kind === 'file').map(item => item.getAsFile());
+    } else {
+      files = [...e.dataTransfer.files];
+    }
+
+    if (files.length === 0) return;
+
+    if (!nodeData.outputs) nodeData.outputs = [];
+    
+    files.forEach(file => {
+      const output = {
+        name: file.name,
+        icon: 'file', // Default icon
+        type: file.type
+      };
+      nodeData.outputs.push(output);
+      
+      // Render Item
+      const itemEl = document.createElement('div');
+      itemEl.className = 'output-item';
+      itemEl.innerHTML = `
+         <span class="output-item-icon"><i data-lucide="file"></i></span>
+         <span class="output-item-text">${this.escapeHtml(file.name)}</span>
+      `;
+      listContainer.appendChild(itemEl);
+    });
+
+    // Refresh Icons for the new items
+    if (window.lucide) window.lucide.createIcons();
+
+    // Update Counts
+    const total = nodeData.outputs.length;
+    if (titleEl) titleEl.textContent = `Output (${total})`;
+    if (toggleBtn) toggleBtn.disabled = false;
+    
+    // Auto-show list
+    listContainer.parentElement.style.display = 'block'; // Ensure container is shown
+    if (toggleBtn) toggleBtn.style.transform = 'rotate(180deg)';
   },
 
   setupGlobalIconPopover() {
@@ -2015,7 +2119,12 @@ const Canvas = {
       inputs: Array.isArray(node.inputs) ? node.inputs : [],
       outputs: Array.isArray(node.outputs) ? node.outputs : [],
       createdAt: node.createdAt || '',
+      createdAt: node.createdAt || '',
       updatedAt: node.updatedAt || '',
+      inputs: node.inputs || [],
+      inputs: node.inputs || [],
+      outputs: node.outputs || [],
+      outputDescription: node.outputDescription || '',
     };
     if (Number.isFinite(x) && Number.isFinite(y)) {
       normalized.x = x;
