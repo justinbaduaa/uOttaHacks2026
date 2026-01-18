@@ -63,6 +63,22 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
+  getCanvasEvidence(canvasId) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.getCanvasEvidence) {
+      return window.glassBox.api.getCanvasEvidence(token, canvasId);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
+  updateCanvasEvidence(canvasId, evidence) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.updateCanvasEvidence) {
+      return window.glassBox.api.updateCanvasEvidence(token, canvasId, evidence);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
   createCanvas(name) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.createCanvas) {
@@ -135,6 +151,14 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
+  leavePresence(canvasId) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.leavePresence) {
+      return window.glassBox.api.leavePresence(token, canvasId);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
+
   uploadToS3(url, contentType, data) {
     if (window.glassBox?.api?.uploadToS3) {
       return window.glassBox.api.uploadToS3(url, contentType, data);
@@ -173,6 +197,7 @@ const Canvas = {
     lastSyncByCanvas: {},
     activeUsers: [],
     activeUsersKey: '',
+    canvasEvidenceById: {},
     isLoadingCanvases: false,
     isLoadingNodes: false,
     isCreatingCanvas: false,
@@ -199,6 +224,7 @@ const Canvas = {
   pendingPositionUpdates: new Map(),
   presenceMaxVisible: 5,
   pendingNodePosition: null,
+  canvasEvidenceRequests: {},
 
   init() {
     this.container = document.getElementById('canvasContainer');
@@ -242,8 +268,16 @@ const Canvas = {
     this.canvasCodePanel = document.getElementById('canvasCodePanel');
     this.canvasCodeValue = document.getElementById('canvasCodeValue');
     this.canvasCodeHint = document.getElementById('canvasCodeHint');
+    this.evidenceSidebar = document.getElementById('evidenceSidebar');
+    this.evidenceList = document.getElementById('evidenceList');
+    this.evidenceDropZone = document.getElementById('evidenceDropZone');
+    this.evidenceNoteInput = document.getElementById('evidenceNoteInput');
+    this.evidenceNoteSubmit = document.getElementById('evidenceNoteSubmit');
+    this.evidenceEmpty = document.getElementById('evidenceEmpty');
+    this.evidenceSubtitle = document.getElementById('evidenceSubtitle');
 
     this.setupEventListeners();
+    this.setupEvidenceListeners();
     this.setupGlobalIconPopover();
     this.updateProfile();
     this.renderSidebar();
@@ -498,6 +532,83 @@ const Canvas = {
     });
   },
 
+  setupEvidenceListeners() {
+    if (this.evidenceDropZone) {
+      this.evidenceDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.evidenceDropZone.classList.add('drag-over');
+      });
+      this.evidenceDropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.evidenceDropZone.classList.remove('drag-over');
+      });
+      this.evidenceDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.evidenceDropZone.classList.remove('drag-over');
+        this.handleEvidenceDrop(e);
+      });
+    }
+
+    if (this.evidenceNoteSubmit) {
+      this.evidenceNoteSubmit.addEventListener('click', () => this.submitEvidenceNote());
+    }
+    if (this.evidenceNoteInput) {
+      this.evidenceNoteInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.submitEvidenceNote();
+        }
+      });
+    }
+
+    if (this.evidenceList) {
+      this.evidenceList.addEventListener('click', (e) => {
+        const fileItem = e.target.closest('.evidence-item[data-file-id], .evidence-item[data-s3-key]');
+        if (fileItem) {
+          const fileId = fileItem.dataset.fileId || '';
+          const s3Key = fileItem.dataset.s3Key || '';
+          const context = this.getEvidenceContext();
+          if (context.scope === 'canvas') {
+            this.downloadCanvasFile({ fileId, s3Key });
+          } else if (context.scope === 'node' && context.node) {
+            this.downloadNodeFile(context.node, { fileId, s3Key });
+          }
+          return;
+        }
+      });
+
+      this.evidenceList.addEventListener('focusin', (e) => {
+        const note = e.target.closest('.evidence-note');
+        if (!note) return;
+        note.dataset.originalValue = note.textContent.trim();
+      });
+
+      this.evidenceList.addEventListener('keydown', (e) => {
+        const note = e.target.closest('.evidence-note');
+        if (!note) return;
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          note.blur();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          const original = note.dataset.originalValue || '';
+          note.textContent = original;
+          note.blur();
+        }
+      });
+
+      this.evidenceList.addEventListener('focusout', (e) => {
+        const note = e.target.closest('.evidence-note');
+        if (!note) return;
+        this.commitEvidenceNoteEdit(note);
+      });
+    }
+  },
+
   handleCanvasDoubleClick(e) {
     if (
       !this.state.selectedCanvasId ||
@@ -732,6 +843,7 @@ const Canvas = {
     if (this.currentPath.length === 0) {
       this.renderNodes(this.getRootNodes());
       this.updateBreadcrumb();
+      this.updateEvidenceSidebar();
       return;
     }
 
@@ -740,6 +852,7 @@ const Canvas = {
     if (!canonicalNode) {
       this.renderNodes([]);
       this.updateBreadcrumb();
+      this.updateEvidenceSidebar();
       return;
     }
 
@@ -750,6 +863,7 @@ const Canvas = {
       this.renderNodes([]);
     }
     this.updateBreadcrumb();
+    this.updateEvidenceSidebar();
   },
 
   renderSidebar() {
@@ -839,6 +953,7 @@ const Canvas = {
         this.updateBreadcrumb();
         this.closeCodePanel();
         this.updateCodePanel();
+        this.updateEvidenceSidebar();
         this.renderNodes([]);
       }
     } catch (error) {
@@ -881,9 +996,15 @@ const Canvas = {
     if (!canvasId || this.state.selectedCanvasId === canvasId) {
       return;
     }
+    const previousCanvasId = this.state.selectedCanvasId;
     this.stopPolling();
     this.pendingPositionUpdates.clear();
     this.positionSyncInFlight = false;
+    if (previousCanvasId) {
+      Api.leavePresence(previousCanvasId).catch((error) => {
+        console.warn('[Canvas] Failed to leave presence', error);
+      });
+    }
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
     this.hideNodeCreatePopover();
@@ -892,6 +1013,8 @@ const Canvas = {
     this.renderSidebar();
     this.updateBreadcrumb();
     this.updateCodePanel(); // Critical update
+    this.updateEvidenceSidebar();
+    this.fetchCanvasEvidence(canvasId);
     await this.loadNodesForCanvas(canvasId);
     if (this.state.selectedCanvasId === canvasId) {
       this.startPolling();
@@ -1169,7 +1292,7 @@ const Canvas = {
     const iconName = nodeData.icon || 'box';
     const inputs = nodeData.inputs || [];
     const outputs = nodeData.outputs || [];
-    const evidenceFiles = (nodeData.evidence || []).filter(item => item.type === 'file');
+    const evidenceFiles = Array.isArray(nodeData?.evidence?.files) ? nodeData.evidence.files : [];
     // If no inputs (new node), showing some mocks provided by user request or keep empty
     // The user request said "drop in it... add a number of resources... dropdown to view"
     // So we start empty or with existing data.
@@ -1215,7 +1338,7 @@ const Canvas = {
                 ${evidenceFiles.map(file => `
                   <div class="input-item" data-file-id="${this.escapeHtml(file.fileId || '')}" data-s3-key="${this.escapeHtml(file.s3Key || '')}">
                      <span class="input-item-icon"><i data-lucide="file"></i></span>
-                     <span class="input-item-text">${this.escapeHtml(file.name || file.filename || 'File')}</span>
+                     <span class="input-item-text">${this.escapeHtml(file.filename || file.name || 'File')}</span>
                   </div>
                 `).join('')}
              </div>
@@ -1911,7 +2034,7 @@ const Canvas = {
     this.refreshCurrentView();
 
     const updatedNode = this.getNode(nodeId);
-    const evidenceFiles = (updatedNode?.evidence || []).filter(item => item.type === 'file');
+    const evidenceFiles = Array.isArray(updatedNode?.evidence?.files) ? updatedNode.evidence.files : [];
     const inputTotal = (updatedNode?.inputs || []).length + evidenceFiles.length;
     const outputTotal = (updatedNode?.outputs || []).length || 0;
     if (titleEl) {
@@ -1930,6 +2053,427 @@ const Canvas = {
     }
   },
 
+  getEvidenceContext() {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId) {
+      return {
+        scope: null,
+        canvasId: null,
+        node: null,
+        evidence: null,
+      };
+    }
+
+    if (this.currentPath && this.currentPath.length > 0) {
+      const nodeId = this.currentPath[this.currentPath.length - 1]?.id || null;
+      const node = nodeId ? this.getNode(nodeId) : null;
+      if (node) {
+        return {
+          scope: 'node',
+          canvasId,
+          node,
+          evidence: node.evidence || null,
+        };
+      }
+      return {
+        scope: 'canvas',
+        canvasId,
+        node: null,
+        evidence: this.state.canvasEvidenceById[canvasId] || null,
+      };
+    }
+
+    return {
+      scope: 'canvas',
+      canvasId,
+      node: null,
+      evidence: this.state.canvasEvidenceById[canvasId] || null,
+    };
+  },
+
+  async fetchCanvasEvidence(canvasId, force = false) {
+    if (!canvasId) return null;
+    if (!force && this.state.canvasEvidenceById[canvasId]) {
+      return this.state.canvasEvidenceById[canvasId];
+    }
+    if (this.canvasEvidenceRequests[canvasId]) {
+      return this.canvasEvidenceRequests[canvasId];
+    }
+
+    this.canvasEvidenceRequests[canvasId] = (async () => {
+      try {
+        const payload = await Api.getCanvasEvidence(canvasId);
+        const evidence = this.normalizeEvidencePayload(payload?.evidence || payload);
+        this.state.canvasEvidenceById[canvasId] = evidence;
+        return evidence;
+      } catch (error) {
+        console.error('[Canvas] Failed to load canvas evidence', error);
+        this.showCanvasToast(error.message || 'Failed to load canvas evidence.', 'error');
+        return this.state.canvasEvidenceById[canvasId] || { notes: [], files: [] };
+      } finally {
+        delete this.canvasEvidenceRequests[canvasId];
+        this.updateEvidenceSidebar();
+      }
+    })();
+
+    return this.canvasEvidenceRequests[canvasId];
+  },
+
+  normalizeEvidencePayload(evidence) {
+    const notes = Array.isArray(evidence?.notes) ? evidence.notes.map((item, index) => {
+      if (typeof item === 'string') {
+        return { noteId: `note-${index}`, text: item, createdAt: null };
+      }
+      const text = item.text || item.content || '';
+      return {
+        noteId: item.noteId || item.id || `note-${index}`,
+        text,
+        createdAt: item.createdAt || item.timestamp || null,
+      };
+    }) : [];
+    const files = Array.isArray(evidence?.files) ? evidence.files : [];
+    return { notes, files };
+  },
+
+  async ensureCanvasEvidence(canvasId) {
+    if (!canvasId) return { notes: [], files: [] };
+    const existing = this.state.canvasEvidenceById[canvasId];
+    if (existing) return existing;
+    const loaded = await this.fetchCanvasEvidence(canvasId);
+    return loaded || { notes: [], files: [] };
+  },
+
+  async handleEvidenceDrop(e) {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId) {
+      this.showCanvasToast('Select a canvas to add evidence.', 'error');
+      return;
+    }
+
+    const context = this.getEvidenceContext();
+    if (!context.scope) {
+      this.showCanvasToast('Select a canvas to add evidence.', 'error');
+      return;
+    }
+    if (context.scope === 'node' && !context.node) {
+      this.showCanvasToast('Open a node to add evidence.', 'error');
+      return;
+    }
+    if (context.scope === 'canvas') {
+      await this.ensureCanvasEvidence(canvasId);
+    }
+
+    let files = [];
+    if (e.dataTransfer.items) {
+      files = [...e.dataTransfer.items].filter(item => item.kind === 'file').map(item => item.getAsFile());
+    } else {
+      files = [...e.dataTransfer.files];
+    }
+
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      try {
+        const contentType = file.type || 'application/octet-stream';
+        const scope = context.scope;
+        const nodeId = scope === 'node' ? context.node.id : undefined;
+        const presigned = await Api.presignFile({
+          canvasId,
+          nodeId,
+          slot: 'evidence',
+          filename: file.name,
+          contentType,
+          scope,
+        });
+
+        const buffer = await file.arrayBuffer();
+        await Api.uploadToS3(presigned.uploadUrl, contentType, buffer);
+
+        const updated = await Api.completeFile({
+          canvasId,
+          nodeId,
+          slot: 'evidence',
+          fileId: presigned.fileId,
+          s3Key: presigned.s3Key,
+          filename: file.name,
+          contentType,
+          scope,
+        });
+
+        if (scope === 'canvas') {
+          const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || updated);
+          this.state.canvasEvidenceById[canvasId] = updatedEvidence;
+        } else {
+          this.applyNodeUpdates(context.node.id, {
+            evidence: updated?.evidence || context.node.evidence,
+            updatedAt: updated?.updatedAt || context.node.updatedAt,
+          }, context.node);
+        }
+      } catch (error) {
+        console.error('[Canvas] Evidence upload failed', error);
+        this.showCanvasToast(error.message || 'Failed to upload evidence file.', 'error');
+      }
+    }
+
+    this.updateEvidenceSidebar();
+  },
+
+  submitEvidenceNote() {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId || !this.evidenceNoteInput) {
+      return;
+    }
+    const text = this.evidenceNoteInput.value.trim();
+    if (!text) {
+      return;
+    }
+    const now = new Date().toISOString();
+    const note = {
+      noteId: `note-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      text,
+      createdAt: now,
+    };
+    this.evidenceNoteInput.value = '';
+    const context = this.getEvidenceContext();
+    if (context.scope === 'node' && context.node) {
+      this.appendEvidenceNoteToNode(context.node, note);
+    } else if (context.scope === 'canvas') {
+      this.appendEvidenceNoteToCanvas(canvasId, note);
+    }
+  },
+
+  async appendEvidenceNoteToNode(node, note) {
+    const evidence = this.normalizeEvidencePayload(node?.evidence);
+    evidence.notes.push(note);
+    await this.saveEvidenceForNode(node, evidence);
+  },
+
+  async appendEvidenceNoteToCanvas(canvasId, note) {
+    const existing = await this.ensureCanvasEvidence(canvasId);
+    const evidence = {
+      notes: [...existing.notes, note],
+      files: [...existing.files],
+    };
+    await this.saveEvidenceForCanvas(canvasId, evidence);
+  },
+
+  async commitEvidenceNoteEdit(noteElement) {
+    if (!noteElement) return;
+    const noteId = noteElement.dataset.noteId;
+    if (!noteId) return;
+    const original = noteElement.dataset.originalValue || '';
+    const updatedText = noteElement.textContent.trim();
+    if (!updatedText) {
+      noteElement.textContent = original;
+      return;
+    }
+    if (updatedText === original) {
+      return;
+    }
+
+    const context = this.getEvidenceContext();
+    if (!context.scope) {
+      return;
+    }
+    const evidenceSource = context.scope === 'canvas'
+      ? await this.ensureCanvasEvidence(context.canvasId)
+      : context.node?.evidence;
+    const evidence = this.normalizeEvidencePayload(evidenceSource);
+    const note = evidence.notes.find(item => (item.noteId || item.id) === noteId);
+    if (!note) {
+      return;
+    }
+    note.text = updatedText;
+    if (context.scope === 'canvas') {
+      await this.saveEvidenceForCanvas(context.canvasId, evidence, original);
+    } else if (context.node) {
+      await this.saveEvidenceForNode(context.node, evidence, original);
+    }
+  },
+
+  async saveEvidenceForNode(node, evidence, fallbackText) {
+    if (!node || !this.state.selectedCanvasId) {
+      return;
+    }
+    try {
+      const updated = await Api.updateNode(node.id, {
+        canvasId: this.state.selectedCanvasId,
+        evidence,
+      });
+      const updatedEvidence = updated?.evidence || evidence;
+      this.applyNodeUpdates(node.id, {
+        evidence: updatedEvidence,
+        updatedAt: updated?.updatedAt || node.updatedAt,
+      }, node);
+      this.updateEvidenceSidebar();
+    } catch (error) {
+      console.error('[Canvas] Failed to save evidence', error);
+      this.showCanvasToast(error.message || 'Failed to save evidence.', 'error');
+      if (fallbackText !== undefined) {
+        this.updateEvidenceSidebar();
+      }
+    }
+  },
+
+  async saveEvidenceForCanvas(canvasId, evidence, fallbackText) {
+    if (!canvasId) {
+      return;
+    }
+    try {
+      const updated = await Api.updateCanvasEvidence(canvasId, evidence);
+      const updatedEvidence = this.normalizeEvidencePayload(updated?.evidence || updated);
+      this.state.canvasEvidenceById[canvasId] = updatedEvidence;
+      this.updateEvidenceSidebar();
+    } catch (error) {
+      console.error('[Canvas] Failed to save canvas evidence', error);
+      this.showCanvasToast(error.message || 'Failed to save evidence.', 'error');
+      if (fallbackText !== undefined) {
+        this.updateEvidenceSidebar();
+      }
+    }
+  },
+
+  updateEvidenceSidebar() {
+    if (!this.evidenceList || !this.evidenceEmpty || !this.evidenceSubtitle) {
+      return;
+    }
+
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId) {
+      this.evidenceList.innerHTML = '';
+      this.evidenceEmpty.textContent = 'Select a canvas to view evidence.';
+      this.evidenceEmpty.style.display = 'block';
+      this.evidenceSubtitle.textContent = 'Canvas log';
+      if (this.evidenceNoteInput) this.evidenceNoteInput.disabled = true;
+      if (this.evidenceNoteSubmit) this.evidenceNoteSubmit.disabled = true;
+      if (this.evidenceDropZone) this.evidenceDropZone.classList.add('is-disabled');
+      return;
+    }
+
+    const selectedCanvas = this.state.canvases.find(c => c.id === canvasId);
+    if (this.evidenceNoteInput) this.evidenceNoteInput.disabled = false;
+    if (this.evidenceNoteSubmit) this.evidenceNoteSubmit.disabled = false;
+    if (this.evidenceDropZone) this.evidenceDropZone.classList.remove('is-disabled');
+
+    const context = this.getEvidenceContext();
+    if (context.scope === 'node' && context.node) {
+      this.evidenceSubtitle.textContent = `${selectedCanvas?.name || 'Canvas'} - ${context.node.name || 'Node'}`;
+      const fallbackTimestamp = context.node.updatedAt || context.node.createdAt || new Date().toISOString();
+      this.renderEvidenceList(context.node.evidence, fallbackTimestamp);
+      return;
+    }
+
+    this.evidenceSubtitle.textContent = `${selectedCanvas?.name || 'Canvas'} - Evidence`;
+    if (!context.evidence) {
+      this.evidenceList.innerHTML = '';
+      this.evidenceEmpty.textContent = 'Loading evidence...';
+      this.evidenceEmpty.style.display = 'block';
+      this.fetchCanvasEvidence(canvasId);
+      return;
+    }
+    this.renderEvidenceList(context.evidence, new Date().toISOString());
+  },
+
+  buildEvidenceEntries(evidence, fallbackTimestamp) {
+    const entries = [];
+    const notes = Array.isArray(evidence?.notes) ? evidence.notes : [];
+    notes.forEach((note, index) => {
+      if (typeof note === 'string') {
+        entries.push({
+          type: 'note',
+          noteId: `note-${index}`,
+          text: note,
+          timestamp: fallbackTimestamp || '',
+        });
+        return;
+      }
+      const text = note.text || note.content || '';
+      entries.push({
+        type: 'note',
+        noteId: note.noteId || note.id || `note-${index}`,
+        text,
+        timestamp: note.createdAt || note.timestamp || fallbackTimestamp || '',
+      });
+    });
+
+    const files = Array.isArray(evidence?.files) ? evidence.files : [];
+    files.forEach((file, index) => {
+      if (file.type && file.type !== 'file') {
+        return;
+      }
+      entries.push({
+        type: 'file',
+        fileId: file.fileId,
+        s3Key: file.s3Key,
+        name: file.filename || file.name || file.fileId || 'File',
+        fileType: file.contentType || '',
+        timestamp: file.createdAt || fallbackTimestamp || '',
+        id: `file-${index}`,
+      });
+    });
+
+    return entries.sort((a, b) => {
+      const aTime = a.timestamp ? Date.parse(a.timestamp) : 0;
+      const bTime = b.timestamp ? Date.parse(b.timestamp) : 0;
+      if (aTime === bTime) {
+        return 0;
+      }
+      return aTime - bTime;
+    });
+  },
+
+  renderEvidenceList(evidence, fallbackTimestamp) {
+    if (!this.evidenceList || !this.evidenceEmpty || !evidence) {
+      return;
+    }
+    const entries = this.buildEvidenceEntries(evidence, fallbackTimestamp);
+    if (!entries || entries.length === 0) {
+      this.evidenceList.innerHTML = '';
+      this.evidenceEmpty.textContent = 'No evidence yet.';
+      this.evidenceEmpty.style.display = 'block';
+      return;
+    }
+
+    const items = entries.map(entry => this.renderEvidenceItem(entry)).join('');
+    this.evidenceList.innerHTML = items;
+    this.evidenceEmpty.style.display = 'none';
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  renderEvidenceItem(entry) {
+    const timestamp = this.formatTime(entry.timestamp);
+    const isNote = entry.type === 'note';
+    const isPdf = !isNote && this.isPdfFile(entry);
+    const text = isNote ? entry.text : entry.name;
+    const icon = isNote
+      ? '<span class="evidence-bullet"></span>'
+      : `<i data-lucide="${isPdf ? 'star' : 'file'}"></i>`;
+
+    const noteAttrs = isNote
+      ? `contenteditable="true" class="evidence-text evidence-note" data-note-id="${this.escapeHtml(entry.noteId || '')}"`
+      : 'class="evidence-text"';
+
+    const fileAttrs = !isNote
+      ? `data-file-id="${this.escapeHtml(entry.fileId || '')}" data-s3-key="${this.escapeHtml(entry.s3Key || '')}"`
+      : '';
+
+    return `
+      <div class="evidence-item" ${fileAttrs}>
+        <div class="evidence-icon">${icon}</div>
+        <div class="evidence-body">
+          <div ${noteAttrs}>${this.escapeHtml(text || 'Untitled')}</div>
+          <div class="evidence-time">${this.escapeHtml(timestamp)}</div>
+        </div>
+      </div>
+    `;
+  },
+
+  isPdfFile(entry) {
+    const name = (entry?.name || '').toLowerCase();
+    const type = (entry?.fileType || '').toLowerCase();
+    return type.includes('pdf') || name.endsWith('.pdf');
+  },
+
   async downloadNodeFile(nodeData, fileMeta) {
     if (!this.state.selectedCanvasId || !nodeData?.id) {
       return;
@@ -1938,6 +2482,35 @@ const Canvas = {
       const payload = await Api.downloadFile({
         canvasId: this.state.selectedCanvasId,
         nodeId: nodeData.id,
+        fileId: fileMeta?.fileId || undefined,
+        s3Key: fileMeta?.s3Key || undefined,
+      });
+      const url = payload?.downloadUrl;
+      if (!url) {
+        throw new Error('Missing download URL');
+      }
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (error) {
+      console.error('[Canvas] File download failed', error);
+      this.showCanvasToast(error.message || 'Failed to download file.', 'error');
+    }
+  },
+
+  async downloadCanvasFile(fileMeta) {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId) {
+      return;
+    }
+    try {
+      const payload = await Api.downloadFile({
+        canvasId,
+        scope: 'canvas',
         fileId: fileMeta?.fileId || undefined,
         s3Key: fileMeta?.s3Key || undefined,
       });
@@ -2117,8 +2690,9 @@ const Canvas = {
   },
 
   normalizeNodeFromApi(node) {
-    const evidence = this.normalizeEvidence(node);
-    const status = this.deriveStatus(node, evidence.length);
+    const evidence = this.normalizeEvidencePayload(node?.evidence);
+    const evidenceCount = this.getEvidenceItemCount(evidence);
+    const status = this.deriveStatus(node, evidenceCount);
     const author = this.resolveAuthor(node.authorSub);
     const x = this.normalizeNumber(node.x);
     const y = this.normalizeNumber(node.y);
@@ -2151,11 +2725,22 @@ const Canvas = {
 
     if (node.evidence && Array.isArray(node.evidence.notes)) {
       node.evidence.notes.forEach((note, index) => {
+        if (typeof note === 'string') {
+          items.push({
+            id: `note-${node.nodeId}-${index}`,
+            type: 'note',
+            content: note,
+            timestamp,
+          });
+          return;
+        }
+        const content = note.text || note.content || '';
+        const noteTimestamp = note.createdAt || note.timestamp || timestamp;
         items.push({
-          id: `note-${node.nodeId}-${index}`,
+          id: `note-${node.nodeId}-${note.noteId || note.id || index}`,
           type: 'note',
-          content: String(note),
-          timestamp,
+          content: String(content),
+          timestamp: noteTimestamp,
         });
       });
     }
@@ -2198,6 +2783,15 @@ const Canvas = {
     }
 
     return items;
+  },
+
+  getEvidenceItemCount(evidence) {
+    if (!evidence || typeof evidence !== 'object') {
+      return 0;
+    }
+    const notesCount = Array.isArray(evidence.notes) ? evidence.notes.length : 0;
+    const filesCount = Array.isArray(evidence.files) ? evidence.files.length : 0;
+    return notesCount + filesCount;
   },
 
   deriveStatus(node, evidenceCount) {
@@ -2247,6 +2841,14 @@ const Canvas = {
       return '--';
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  },
+
+  formatTime(timestamp) {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+      return '--';
+    }
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   },
 
   getStatusLabel(status) {
@@ -2422,8 +3024,8 @@ const Canvas = {
       const existing = this.state.nodesById[incoming.id];
       if (existing) {
         // Update existing node
-        const existingEvidenceCount = Array.isArray(existing.evidence) ? existing.evidence.length : 0;
-        const incomingEvidenceCount = Array.isArray(incoming.evidence) ? incoming.evidence.length : 0;
+        const existingEvidenceCount = this.getEvidenceItemCount(existing.evidence);
+        const incomingEvidenceCount = this.getEvidenceItemCount(incoming.evidence);
         const existingInputsCount = Array.isArray(existing.inputs) ? existing.inputs.length : 0;
         const incomingInputsCount = Array.isArray(incoming.inputs) ? incoming.inputs.length : 0;
         const existingOutputsCount = Array.isArray(existing.outputs) ? existing.outputs.length : 0;
@@ -2462,6 +3064,11 @@ const Canvas = {
     if (needsRefresh) {
       this.buildNodeIndex();
       this.refreshCurrentView();
+    }
+
+    const currentNodeId = this.currentPath[this.currentPath.length - 1]?.id;
+    if (currentNodeId && incomingNodes.some(node => node.id === currentNodeId)) {
+      this.updateEvidenceSidebar();
     }
   },
 

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from lib.auth import require_auth
-from lib.dynamodb import get_node, get_nodes_table, require_membership
+from lib.dynamodb import get_canvas_table, get_node, get_nodes_table, require_membership
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
 from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
@@ -50,16 +50,12 @@ def presign_file(event, context):
         if not is_member:
             return membership_error
 
-        node_id = body.get("nodeId")
-        if not node_id:
+        scope = body.get("scope") or "node"
+        if scope not in ["node", "canvas"]:
             return error_response(
                 code="INVALID_REQUEST",
-                message="nodeId is required",
+                message="scope must be 'node' or 'canvas'",
             )
-
-        valid, error_msg = validate_node_id(node_id)
-        if not valid:
-            return error_response(code="INVALID_REQUEST", message=error_msg)
 
         slot = body.get("slot")
         if not slot:
@@ -72,6 +68,12 @@ def presign_file(event, context):
         if not valid:
             return error_response(code="INVALID_REQUEST", message=error_msg)
 
+        if scope == "canvas" and slot != "evidence":
+            return error_response(
+                code="INVALID_REQUEST",
+                message="canvas uploads only support slot 'evidence'",
+            )
+
         filename = body.get("filename")
         if not filename or not isinstance(filename, str):
             return error_response(
@@ -81,20 +83,49 @@ def presign_file(event, context):
 
         content_type = body.get("contentType", "application/octet-stream")
 
-        # Verify node exists and belongs to canvas
-        node = get_node(canvas_id, node_id)
-        if not node:
-            return error_response(
-                code="NOT_FOUND",
-                message="Node not found",
-                status_code=404,
+        node_id = body.get("nodeId")
+        if scope == "node":
+            if not node_id:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="nodeId is required",
+                )
+
+            valid, error_msg = validate_node_id(node_id)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+            # Verify node exists and belongs to canvas
+            node = get_node(canvas_id, node_id)
+            if not node:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Node not found",
+                    status_code=404,
+                )
+        else:
+            table = get_canvas_table()
+            response = table.get_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                }
             )
+            if "Item" not in response:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Canvas not found",
+                    status_code=404,
+                )
 
         # Generate file ID
         file_id = str(uuid.uuid4())
 
-        # Construct S3 key: canvases/{canvasId}/nodes/{nodeId}/{fileId}/{filename}
-        s3_key = f"canvases/{canvas_id}/nodes/{node_id}/{file_id}/{filename}"
+        # Construct S3 key
+        if scope == "canvas":
+            s3_key = f"canvases/{canvas_id}/evidence/{file_id}/{filename}"
+        else:
+            s3_key = f"canvases/{canvas_id}/nodes/{node_id}/{file_id}/{filename}"
 
         # Generate presigned PUT URL
         upload_url = generate_presigned_put_url(s3_key, content_type)
@@ -103,7 +134,7 @@ def presign_file(event, context):
 
         logger.info(
             f"Generated presigned URL for file upload: {s3_key} "
-            f"(canvas={canvas_id}, node={node_id})"
+            f"(canvas={canvas_id}, scope={scope})"
         )
 
         return success_response({
@@ -148,16 +179,12 @@ def complete_file(event, context):
         if not is_member:
             return membership_error
 
-        node_id = body.get("nodeId")
-        if not node_id:
+        scope = body.get("scope") or "node"
+        if scope not in ["node", "canvas"]:
             return error_response(
                 code="INVALID_REQUEST",
-                message="nodeId is required",
+                message="scope must be 'node' or 'canvas'",
             )
-
-        valid, error_msg = validate_node_id(node_id)
-        if not valid:
-            return error_response(code="INVALID_REQUEST", message=error_msg)
 
         slot = body.get("slot")
         if not slot:
@@ -169,6 +196,12 @@ def complete_file(event, context):
         valid, error_msg = validate_file_slot(slot)
         if not valid:
             return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        if scope == "canvas" and slot != "evidence":
+            return error_response(
+                code="INVALID_REQUEST",
+                message="canvas uploads only support slot 'evidence'",
+            )
 
         file_id = body.get("fileId")
         if not file_id:
@@ -193,14 +226,41 @@ def complete_file(event, context):
 
         content_type = body.get("contentType", "application/octet-stream")
 
-        # Verify node exists and belongs to canvas
-        node = get_node(canvas_id, node_id)
-        if not node:
-            return error_response(
-                code="NOT_FOUND",
-                message="Node not found",
-                status_code=404,
+        node_id = body.get("nodeId")
+        node = None
+        if scope == "node":
+            if not node_id:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="nodeId is required",
+                )
+
+            valid, error_msg = validate_node_id(node_id)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+            # Verify node exists and belongs to canvas
+            node = get_node(canvas_id, node_id)
+            if not node:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Node not found",
+                    status_code=404,
+                )
+        else:
+            table = get_canvas_table()
+            response = table.get_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                }
             )
+            if "Item" not in response:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Canvas not found",
+                    status_code=404,
+                )
 
         # Create file item
         file_item = {
@@ -209,10 +269,61 @@ def complete_file(event, context):
             "s3Key": s3_key,
             "filename": filename,
             "contentType": content_type,
+            "createdAt": datetime.utcnow().isoformat() + "Z",
         }
 
-        # Update node with new file reference
         now = datetime.utcnow().isoformat() + "Z"
+        if scope == "canvas":
+            table = get_canvas_table()
+            response = table.get_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                }
+            )
+            meta_item = response.get("Item")
+            if not meta_item:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Canvas not found",
+                    status_code=404,
+                )
+            evidence, evidence_error = normalize_evidence(meta_item.get("evidence"))
+            if evidence_error:
+                return error_response(code="INVALID_REQUEST", message=evidence_error)
+            evidence_files = evidence.get("files", [])
+            evidence_files.append(file_item)
+            evidence["files"] = evidence_files
+
+            response = table.update_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                },
+                UpdateExpression="SET evidence = :evidence, updatedAt = :now",
+                ExpressionAttributeValues={
+                    ":evidence": evidence,
+                    ":now": now,
+                },
+                ReturnValues="ALL_NEW",
+            )
+            updated_item = response.get("Attributes", {})
+            updated_evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+            if evidence_error:
+                updated_evidence = evidence
+
+            logger.info(
+                f"Completed file upload for canvas {canvas_id}: "
+                f"{file_id} added to evidence"
+            )
+
+            return success_response({
+                "canvasId": canvas_id,
+                "evidence": updated_evidence,
+                "updatedAt": updated_item.get("updatedAt") or now,
+            })
+
+        # Update node with new file reference
         table = get_nodes_table()
 
         expression_attribute_values = {
@@ -309,16 +420,12 @@ def download_file(event, context):
         if not is_member:
             return membership_error
 
-        node_id = body.get("nodeId")
-        if not node_id:
+        scope = body.get("scope") or "node"
+        if scope not in ["node", "canvas"]:
             return error_response(
                 code="INVALID_REQUEST",
-                message="nodeId is required",
+                message="scope must be 'node' or 'canvas'",
             )
-
-        valid, error_msg = validate_node_id(node_id)
-        if not valid:
-            return error_response(code="INVALID_REQUEST", message=error_msg)
 
         file_id = body.get("fileId")
         s3_key = body.get("s3Key")
@@ -328,20 +435,51 @@ def download_file(event, context):
                 message="fileId or s3Key is required",
             )
 
-        # Verify node exists and belongs to canvas
-        node = get_node(canvas_id, node_id)
-        if not node:
-            return error_response(
-                code="NOT_FOUND",
-                message="Node not found",
-                status_code=404,
-            )
-
         candidates = []
-        candidates.extend(node.get("inputs", []))
-        candidates.extend(node.get("outputs", []))
-        evidence = node.get("evidence")
-        if isinstance(evidence, dict):
+        if scope == "node":
+            node_id = body.get("nodeId")
+            if not node_id:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="nodeId is required",
+                )
+
+            valid, error_msg = validate_node_id(node_id)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+            # Verify node exists and belongs to canvas
+            node = get_node(canvas_id, node_id)
+            if not node:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Node not found",
+                    status_code=404,
+                )
+
+            candidates.extend(node.get("inputs", []))
+            candidates.extend(node.get("outputs", []))
+            evidence = node.get("evidence")
+            if isinstance(evidence, dict):
+                candidates.extend(evidence.get("files", []))
+        else:
+            table = get_canvas_table()
+            response = table.get_item(
+                Key={
+                    "PK": f"CANVAS#{canvas_id}",
+                    "SK": "META",
+                }
+            )
+            item = response.get("Item")
+            if not item:
+                return error_response(
+                    code="NOT_FOUND",
+                    message="Canvas not found",
+                    status_code=404,
+                )
+            evidence, evidence_error = normalize_evidence(item.get("evidence"))
+            if evidence_error:
+                evidence = {"notes": [], "files": []}
             candidates.extend(evidence.get("files", []))
 
         matched = None

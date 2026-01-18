@@ -26,4 +26,4 @@ npm-debug.log*
 
 # Electron
 release/
-/backend/.aws-sam
+/backend/.aws-sam/

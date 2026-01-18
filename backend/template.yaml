@@ -213,6 +213,40 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref CanvasTable
 
+  GetCanvasEvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxGetCanvasEvidence
+      CodeUri: src/
+      Handler: handlers.canvases.get_canvas_evidence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: get
+            Path: /canvases/{canvasId}/evidence
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  UpdateCanvasEvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxUpdateCanvasEvidence
+      CodeUri: src/
+      Handler: handlers.canvases.update_canvas_evidence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: patch
+            Path: /canvases/{canvasId}/evidence
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CanvasTable
+
   GetNodesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -229,7 +263,7 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref NodesTable
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref CanvasTable
 
   CreateNodeFunction:
@@ -333,7 +367,7 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref NodesTable
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref CanvasTable
 
   DownloadFileFunction:
@@ -356,6 +390,23 @@ Resources:
             TableName: !Ref CanvasTable
         - S3ReadPolicy:
             BucketName: !Ref FilesBucket
+
+  LeavePresenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxLeavePresence
+      CodeUri: src/
+      Handler: handlers.presence.leave_presence
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /presence/leave
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CanvasTable
 
 Outputs:
   ApiUrl:

@@ -1,7 +1,7 @@
 """Node-related Lambda handlers."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List
 
@@ -14,6 +14,8 @@ from lib.dynamodb import (
     query_nodes_by_canvas,
     query_nodes_by_parent,
     require_membership,
+    upsert_canvas_presence,
+    list_canvas_presence,
 )
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
@@ -29,6 +31,7 @@ from lib.validation import (
 )
 
 logger = get_logger(__name__)
+PRESENCE_ACTIVE_WINDOW_SECONDS = 30
 
 
 def get_nodes(event, context):
@@ -59,6 +62,20 @@ def get_nodes(event, context):
         if not is_member:
             return membership_error
 
+        claims = (
+            event.get("requestContext", {})
+            .get("authorizer", {})
+            .get("jwt", {})
+            .get("claims", {})
+        )
+        display_name = (
+            claims.get("email")
+            or claims.get("cognito:username")
+            or claims.get("username")
+            or f"User {user_sub[-4:]}"
+        )
+        upsert_canvas_presence(canvas_id, user_sub, display_name)
+
         # Get parent node ID (default to ROOT)
         parent_node_id = params.get("parentNodeId", "ROOT")
         include_all = params.get("includeAll", "").lower() in ("1", "true", "yes")
@@ -76,12 +93,18 @@ def get_nodes(event, context):
         else:
             nodes = query_nodes_by_parent(canvas_id, parent_node_id, updated_since)
 
+        active_since = (datetime.utcnow() - timedelta(seconds=PRESENCE_ACTIVE_WINDOW_SECONDS)).isoformat() + "Z"
+        active_users = list_canvas_presence(canvas_id, active_since)
+
         logger.info(
             f"Retrieved {len(nodes)} nodes for canvas {canvas_id}, "
             f"parent {parent_node_id}, includeAll={include_all}"
         )
 
-        return success_response(nodes)
+        return success_response({
+            "nodes": nodes,
+            "activeUsers": active_users,
+        })
 
     except Exception as e:
         logger.error(f"Error getting nodes: {str(e)}", exc_info=True)

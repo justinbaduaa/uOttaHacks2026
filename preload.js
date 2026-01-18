@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('glassBox', {
   startAuth: () => ipcRenderer.invoke('start-auth'),
   api: {
     listCanvases: (token) => ipcRenderer.invoke('api-list-canvases', token),
+    getCanvasEvidence: (token, canvasId) => ipcRenderer.invoke('api-get-canvas-evidence', { token, canvasId }),
+    updateCanvasEvidence: (token, canvasId, evidence) => ipcRenderer.invoke('api-update-canvas-evidence', { token, canvasId, evidence }),
     createCanvas: (token, name) => ipcRenderer.invoke('api-create-canvas', { token, name }),
     listNodes: (token, canvasId, updatedSince) => ipcRenderer.invoke('api-list-nodes', { token, canvasId, updatedSince }),
     createNode: (token, payload) => ipcRenderer.invoke('api-create-node', { token, payload }),
@@ -14,6 +16,7 @@ contextBridge.exposeInMainWorld('glassBox', {
     presignFile: (token, payload) => ipcRenderer.invoke('api-presign-file', { token, payload }),
     completeFile: (token, payload) => ipcRenderer.invoke('api-complete-file', { token, payload }),
     downloadFile: (token, payload) => ipcRenderer.invoke('api-download-file', { token, payload }),
+    leavePresence: (token, canvasId) => ipcRenderer.invoke('api-leave-presence', { token, canvasId }),
     uploadToS3: (url, contentType, data) => ipcRenderer.invoke('api-upload-s3', { url, contentType, data }),
   },
 });
