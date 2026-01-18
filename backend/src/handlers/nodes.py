@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Dict, List
 
 from lib.auth import require_auth
@@ -162,6 +163,8 @@ def create_node(event, context):
                     code="INVALID_REQUEST",
                     message="x and y must be numbers",
                 )
+            position_x = Decimal(str(position_x))
+            position_y = Decimal(str(position_y))
 
         # Generate node ID
         node_id = str(uuid.uuid4())
@@ -186,8 +189,8 @@ def create_node(event, context):
             "updatedAt": now,
         }
         if position_x is not None and position_y is not None:
-            item["x"] = float(position_x)
-            item["y"] = float(position_y)
+            item["x"] = position_x
+            item["y"] = position_y
 
         table = get_nodes_table()
         table.put_item(
@@ -338,8 +341,8 @@ def update_node(event, context):
             update_expressions.append("#y = :y")
             expression_attribute_names["#x"] = "x"
             expression_attribute_names["#y"] = "y"
-            expression_attribute_values[":x"] = float(position_x)
-            expression_attribute_values[":y"] = float(position_y)
+            expression_attribute_values[":x"] = Decimal(str(position_x))
+            expression_attribute_values[":y"] = Decimal(str(position_y))
 
         # Execute update
         table = get_nodes_table()

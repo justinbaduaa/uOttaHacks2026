@@ -164,7 +164,10 @@ const Canvas = {
   pollIntervalMs: 7000,
   pollTimer: null,
   pollInFlight: false,
+  positionSyncInFlight: false,
+  pendingPositionUpdates: new Map(),
   presenceMaxVisible: 5,
+  pendingNodePosition: null,
 
   init() {
     this.container = document.getElementById('canvasContainer');
@@ -481,6 +484,7 @@ const Canvas = {
     const x = Math.min(Math.max(rawX, margin), maxX);
     const y = Math.min(Math.max(rawY, margin), maxY);
 
+    this.pendingNodePosition = { x, y };
     this.pendingNodeParentId = this.currentPath.length > 0
       ? this.currentPath[this.currentPath.length - 1].id
       : null;
@@ -509,6 +513,7 @@ const Canvas = {
     this.nodeCreatePopover.setAttribute('aria-hidden', 'true');
     this.isNodeCreateVisible = false;
     this.pendingNodeParentId = null;
+    this.pendingNodePosition = null;
     if (this.nodeCreateError) {
       this.nodeCreateError.textContent = '';
     }
@@ -600,6 +605,10 @@ const Canvas = {
       outputs: [],
       evidence: { notes: [], files: [] },
     };
+    if (this.pendingNodePosition) {
+      payload.x = this.pendingNodePosition.x;
+      payload.y = this.pendingNodePosition.y;
+    }
 
     this.state.isNodeCreateSubmitting = true;
     this.nodeCreateConfirm.disabled = true;
@@ -613,6 +622,10 @@ const Canvas = {
     try {
       const created = await Api.createNode(payload);
       const normalized = this.normalizeNodeFromApi(created);
+      if (this.pendingNodePosition && !Number.isFinite(normalized.x) && !Number.isFinite(normalized.y)) {
+        normalized.x = this.pendingNodePosition.x;
+        normalized.y = this.pendingNodePosition.y;
+      }
       this.state.nodes = [normalized, ...this.state.nodes];
       this.buildNodeIndex();
       this.refreshCurrentView();
@@ -831,6 +844,8 @@ const Canvas = {
       return;
     }
     this.stopPolling();
+    this.pendingPositionUpdates.clear();
+    this.positionSyncInFlight = false;
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
     this.hideNodeCreatePopover();
@@ -1096,8 +1111,13 @@ const Canvas = {
     // Calculate initial position in a grid layout
     const col = index % 3;
     const row = Math.floor(index / 3);
-    const x = 80 + col * 360;
-    const y = 80 + row * 260;
+    const hasStoredPosition = Number.isFinite(nodeData.x) && Number.isFinite(nodeData.y);
+    const x = hasStoredPosition ? nodeData.x : 80 + col * 360;
+    const y = hasStoredPosition ? nodeData.y : 80 + row * 260;
+    if (!hasStoredPosition) {
+      nodeData.x = x;
+      nodeData.y = y;
+    }
 
     element.style.transform = `translate(${x}px, ${y}px)`;
 
@@ -1528,12 +1548,19 @@ const Canvas = {
 
     this.selectedNode.x = newX;
     this.selectedNode.y = newY;
+    this.selectedNode.data.x = newX;
+    this.selectedNode.data.y = newY;
     this.selectedNode.element.style.transform = `translate(${newX}px, ${newY}px)`;
   },
 
   stopDrag() {
     if (this.selectedNode) {
       this.selectedNode.element.classList.remove('dragging');
+      this.queuePositionUpdate(this.selectedNode.data.id, this.selectedNode.x, this.selectedNode.y);
+      this.applyNodeUpdates(this.selectedNode.data.id, {
+        x: this.selectedNode.x,
+        y: this.selectedNode.y,
+      }, this.selectedNode.data);
     }
     this.isDragging = false;
     this.selectedNode = null;
@@ -1685,8 +1712,10 @@ const Canvas = {
     const evidence = this.normalizeEvidence(node);
     const status = this.deriveStatus(node, evidence.length);
     const author = this.resolveAuthor(node.authorSub);
+    const x = this.normalizeNumber(node.x);
+    const y = this.normalizeNumber(node.y);
 
-    return {
+    const normalized = {
       id: node.nodeId,
       name: node.title || 'Untitled',
       goal: node.description || '',
@@ -1699,6 +1728,11 @@ const Canvas = {
       createdAt: node.createdAt || '',
       updatedAt: node.updatedAt || '',
     };
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      normalized.x = x;
+      normalized.y = y;
+    }
+    return normalized;
   },
 
   normalizeEvidence(node) {
@@ -1869,6 +1903,7 @@ const Canvas = {
 
     this.pollInFlight = true;
     try {
+      await this.flushPendingPositionUpdates();
       const updatedSince = this.getUpdatedSinceForPoll(canvasId);
       console.log('[Canvas] Polling nodes since:', updatedSince || '(initial)');
       const payload = await Api.listNodes(canvasId, updatedSince);
@@ -1888,6 +1923,52 @@ const Canvas = {
     } finally {
       this.pollInFlight = false;
     }
+  },
+
+  queuePositionUpdate(nodeId, x, y) {
+    if (!nodeId || !Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    this.pendingPositionUpdates.set(nodeId, { x, y });
+  },
+
+  async flushPendingPositionUpdates() {
+    if (this.positionSyncInFlight || this.pendingPositionUpdates.size === 0) {
+      return;
+    }
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId) {
+      return;
+    }
+    this.positionSyncInFlight = true;
+    const entries = Array.from(this.pendingPositionUpdates.entries());
+    this.pendingPositionUpdates.clear();
+
+    for (const [nodeId, position] of entries) {
+      try {
+        const updated = await Api.updateNode(nodeId, {
+          canvasId,
+          x: position.x,
+          y: position.y,
+        });
+        const resolvedX = this.normalizeNumber(updated?.x);
+        const resolvedY = this.normalizeNumber(updated?.y);
+        this.applyNodeUpdates(
+          nodeId,
+          {
+            x: Number.isFinite(resolvedX) ? resolvedX : position.x,
+            y: Number.isFinite(resolvedY) ? resolvedY : position.y,
+            updatedAt: updated?.updatedAt,
+          },
+          this.state.nodesById[nodeId]
+        );
+      } catch (error) {
+        console.warn('[Canvas] Failed to sync node position', error);
+        this.pendingPositionUpdates.set(nodeId, position);
+      }
+    }
+
+    this.positionSyncInFlight = false;
   },
 
   normalizeNodesPayload(payload) {
@@ -1936,6 +2017,13 @@ const Canvas = {
           const descEl = rendered.element.querySelector('.node-description');
           if (titleEl) titleEl.textContent = incoming.name || 'Untitled';
           if (descEl) descEl.textContent = incoming.goal || 'Description';
+          const hasPosition = Number.isFinite(incoming.x) && Number.isFinite(incoming.y);
+          const isDraggingThis = this.isDragging && this.selectedNode?.data?.id === incoming.id;
+          if (hasPosition && !isDraggingThis) {
+            rendered.x = incoming.x;
+            rendered.y = incoming.y;
+            rendered.element.style.transform = `translate(${incoming.x}px, ${incoming.y}px)`;
+          }
         }
       } else {
         // New node
@@ -1979,6 +2067,17 @@ const Canvas = {
     const ms = fraction ? fraction.padEnd(3, '0').slice(0, 3) : '000';
 
     return `${base}.${ms}${zone}`;
+  },
+
+  normalizeNumber(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
   },
 
   getUpdatedSinceForPoll(canvasId) {
