@@ -102,6 +102,14 @@ const Api = {
     }
     return Promise.reject(new Error('API bridge unavailable'));
   },
+
+  joinCanvas(joinCode) {
+    const token = this.getAuthToken();
+    if (window.glassBox?.api?.joinCanvas) {
+      return window.glassBox.api.joinCanvas(token, joinCode);
+    }
+    return Promise.reject(new Error('API bridge unavailable'));
+  },
 };
 
 const Canvas = {
@@ -206,6 +214,70 @@ const Canvas = {
     this.renderSidebar();
     this.updateBreadcrumb();
     this.loadCanvases();
+  },
+
+  startPolling() {
+    this.stopPolling();
+    this.poll();
+    this.pollTimer = setInterval(() => this.poll(), this.pollIntervalMs);
+  },
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  },
+
+  async poll() {
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId || this.state.isLoadingNodes || this.pollInFlight) {
+      return;
+    }
+
+    this.pollInFlight = true;
+    const lastSync = this.state.lastSyncByCanvas[canvasId];
+
+    try {
+      const payload = await Api.listNodes(canvasId, lastSync);
+      const { nodes, activeUsers } = this.normalizeNodesPayload(payload);
+      
+      // Update active users regardless of nodes
+      this.setActiveUsers(activeUsers);
+
+      if (nodes && nodes.length > 0) {
+        // Merge updates
+        const updates = nodes.filter(n => !n.deletedAt).map(n => this.normalizeNodeFromApi(n));
+        const deletedIds = nodes.filter(n => n.deletedAt).map(n => n.nodeId);
+
+        if (deletedIds.length > 0) {
+          this.removeNodesFromState(deletedIds);
+        }
+
+        updates.forEach(updatedNode => {
+           this.applyNodeUpdates(updatedNode.id, updatedNode, this.state.nodesById[updatedNode.id]);
+           if (!this.state.nodesById[updatedNode.id]) {
+             // New node
+             this.state.nodes = [updatedNode, ...this.state.nodes];
+           }
+        });
+
+        if (updates.length > 0 || deletedIds.length > 0) {
+          this.buildNodeIndex();
+          this.refreshCurrentView();
+          
+          // Update lastSync timestamp
+          const latest = this.getLatestUpdatedAt(updates);
+          if (latest) {
+             this.state.lastSyncByCanvas[canvasId] = latest;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Canvas] Poll failed', error);
+    } finally {
+      this.pollInFlight = false;
+    }
   },
 
   setupEventListeners() {

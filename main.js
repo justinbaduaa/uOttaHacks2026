@@ -253,12 +253,15 @@ ipcMain.handle("api-create-canvas", async (event, { token, name }) => {
   return apiRequest({ path: "/canvases", method: "POST", token, body: { name } });
 });
 
-ipcMain.handle("api-list-nodes", async (event, { token, canvasId }) => {
+ipcMain.handle("api-list-nodes", async (event, { token, canvasId, updatedSince }) => {
   const params = new URLSearchParams({
     canvasId,
     includeAll: "true",
     includeDeleted: "false",
   });
+  if (updatedSince) {
+    params.append("updatedSince", updatedSince);
+  }
   return apiRequest({ path: `/nodes?${params.toString()}`, method: "GET", token });
 });
 
@@ -312,4 +315,11 @@ ipcMain.handle("api-delete-node", async (event, { token, nodeId, canvasId }) => 
   }
   const params = new URLSearchParams({ canvasId });
   return apiRequest({ path: `/nodes/${nodeId}?${params.toString()}`, method: "DELETE", token });
+});
+
+ipcMain.handle("api-join-canvas", async (event, { token, joinCode }) => {
+  if (!joinCode) {
+    throw new Error("Missing joinCode");
+  }
+  return apiRequest({ path: "/canvases/join", method: "POST", token, body: { joinCode } });
 });
