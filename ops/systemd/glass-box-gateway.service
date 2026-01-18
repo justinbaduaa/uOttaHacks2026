@@ -1,0 +1,16 @@
+[Unit]
+Description=Glass Box Gateway (Solace Agent Mesh)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/glassbox/uOttaHacks2026/agent-mesh
+EnvironmentFile=/opt/glassbox/uOttaHacks2026/agent-mesh/.env
+ExecStart=/opt/glassbox/uOttaHacks2026/.venv/bin/solace-agent-mesh run
+Restart=on-failure
+RestartSec=5
+User=ubuntu
+Group=ubuntu
+
+[Install]
+WantedBy=multi-user.target

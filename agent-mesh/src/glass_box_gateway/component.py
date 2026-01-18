@@ -89,14 +89,15 @@ class _ExecuteRequestHandler(BaseHTTPRequestHandler):
                 self._write_json(401, {"ok": False, "error": "Unauthorized"})
                 return
 
-        if not component.async_loop or not component.async_loop.is_running():
+        async_loop = component._resolve_async_loop()
+        if not async_loop or not async_loop.is_running():
             self._write_json(503, {"ok": False, "error": "Gateway not ready"})
             return
 
         try:
             future = asyncio.run_coroutine_threadsafe(
                 component.handle_execute_request(payload, dict(self.headers)),
-                component.async_loop,
+                async_loop,
             )
             result = future.result(timeout=component.backend_timeout_seconds)
             self._write_json(200, {"ok": True, "data": result})
@@ -111,7 +112,8 @@ class _ExecuteRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        if not component.async_loop or not component.async_loop.is_running():
+        async_loop = component._resolve_async_loop()
+        if not async_loop or not async_loop.is_running():
             self._write_json(503, {"ok": False, "error": "Gateway not ready"})
             return
 
@@ -194,10 +196,17 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             self.stop_signal.set()
             return
 
-        if self.async_loop and self.async_loop.is_running():
-            self._approval_poll_task = self.async_loop.create_task(self._approval_poll_loop())
+        async_loop = self._resolve_async_loop()
+        if async_loop and async_loop.is_running():
+            self._approval_poll_task = async_loop.create_task(self._approval_poll_loop())
 
         log.info("%s Gateway HTTP listener started.", log_id_prefix)
+
+    def _resolve_async_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        loop = getattr(self, "async_loop", None)
+        if loop is None:
+            loop = getattr(self, "_async_loop", None)
+        return loop
 
     def _stop_listener(self) -> None:
         log_id_prefix = f"{self.log_identifier}[StopListener]"
@@ -1369,11 +1378,12 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         return b""
 
     def _get_node_for_stream(self, canvas_id: str, node_id: str, auth_token: str) -> Dict[str, Any]:
-        if not self.async_loop or not self.async_loop.is_running():
+        async_loop = self._resolve_async_loop()
+        if not async_loop or not async_loop.is_running():
             raise BackendError("Async loop not running")
         future = asyncio.run_coroutine_threadsafe(
             self._backend_get_node(canvas_id, node_id, auth_token),
-            self.async_loop,
+            async_loop,
         )
         return future.result(timeout=self.backend_timeout_seconds)
 

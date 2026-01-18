@@ -1,6 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Glass Box Collaborative Canvas Backend
+Parameters:
+  GatewayApiBaseUrl:
+    Type: String
+    Default: ''
+  GatewaySharedSecret:
+    Type: String
+    Default: ''
 Globals:
   Function:
     Runtime: python3.13
@@ -16,6 +23,10 @@ Globals:
           Ref: FilesBucket
         USER_POOL_ID:
           Ref: UserPool
+        GATEWAY_API_BASE_URL:
+          Ref: GatewayApiBaseUrl
+        GATEWAY_SHARED_SECRET:
+          Ref: GatewaySharedSecret
 Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -58,11 +69,20 @@ Resources:
         AttributeType: S
       - AttributeName: SK
         AttributeType: S
+      - AttributeName: joinCode
+        AttributeType: S
       KeySchema:
       - AttributeName: PK
         KeyType: HASH
       - AttributeName: SK
         KeyType: RANGE
+      GlobalSecondaryIndexes:
+      - IndexName: JoinCodeIndex
+        KeySchema:
+        - AttributeName: joinCode
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
   NodesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -204,6 +224,29 @@ Resources:
             Ref: CanvasTable
     Metadata:
       SamResourceId: GetNodesFunction
+  GetNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxGetNode
+      CodeUri: GetNodeFunction
+      Handler: handlers.nodes.get_node_by_id
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: get
+            Path: /nodes/{nodeId}
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: NodesTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: GetNodeFunction
   CreateNodeFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -281,6 +324,52 @@ Resources:
             Fn::Sub: arn:${AWS::Partition}:s3:::${FilesBucket}/*
     Metadata:
       SamResourceId: DeleteNodeFunction
+  ExecuteNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxExecuteNode
+      CodeUri: ExecuteNodeFunction
+      Handler: handlers.nodes.execute_node
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: post
+            Path: /nodes/{nodeId}/execute
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: NodesTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: ExecuteNodeFunction
+  ApproveNodeActionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxApproveNodeAction
+      CodeUri: ApproveNodeActionFunction
+      Handler: handlers.nodes.approve_node_action
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: post
+            Path: /nodes/{nodeId}/approve
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: NodesTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CanvasTable
+    Metadata:
+      SamResourceId: ApproveNodeActionFunction
   PresignFileFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -327,6 +416,32 @@ Resources:
             Ref: CanvasTable
     Metadata:
       SamResourceId: CompleteFileFunction
+  PresignDownloadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxPresignDownload
+      CodeUri: PresignDownloadFunction
+      Handler: handlers.files.presign_download
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: ApiGateway
+            Method: post
+            Path: /files/presign-download
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: NodesTable
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CanvasTable
+      - S3ReadPolicy:
+          BucketName:
+            Ref: FilesBucket
+    Metadata:
+      SamResourceId: PresignDownloadFunction
 Outputs:
   ApiUrl:
     Description: API Gateway HTTP API URL

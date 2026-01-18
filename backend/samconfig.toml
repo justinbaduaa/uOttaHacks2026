@@ -4,10 +4,10 @@ version = 0.1
 stack_name = "sam-backend-glassbox"
 resolve_s3 = true
 s3_prefix = "sam-backend-glassbox"
-region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
+parameter_overrides = "GatewayApiBaseUrl=\"\" GatewaySharedSecret=\"\""
 
 [default.global.parameters]
 region = "us-east-1"

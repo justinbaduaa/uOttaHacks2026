@@ -8,12 +8,13 @@ from lib.auth import require_auth
 from lib.dynamodb import get_node, get_nodes_table, require_membership
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
-from lib.s3 import generate_presigned_put_url
+from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
 from lib.validation import (
     parse_body,
     validate_canvas_id,
     validate_file_slot,
     validate_node_id,
+    normalize_evidence,
 )
 
 logger = get_logger(__name__)
@@ -239,6 +240,9 @@ def complete_file(event, context):
         )
 
         updated_item = response["Attributes"]
+        evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+        if evidence_error:
+            evidence = []
 
         logger.info(
             f"Completed file upload for node {node_id} in canvas {canvas_id}: "
@@ -254,6 +258,13 @@ def complete_file(event, context):
             "description": updated_item["description"],
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
+            "evidence": evidence,
+            "status": updated_item.get("status") or "draft",
+            "approvalMode": updated_item.get("approvalMode"),
+            "assignedTo": updated_item.get("assignedTo"),
+            "approvalRequests": updated_item.get("approvalRequests", []),
+            "activityLog": updated_item.get("activityLog", []),
+            "activeTaskId": updated_item.get("activeTaskId"),
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
@@ -264,3 +275,105 @@ def complete_file(event, context):
     except Exception as e:
         logger.error(f"Error completing file upload: {str(e)}", exc_info=True)
         return internal_error_response("Failed to complete file upload")
+
+
+def presign_download(event, context):
+    """POST /files/presign-download - Generate a presigned URL for file download."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        body, parse_error = parse_body(event)
+        if parse_error:
+            return parse_error
+
+        canvas_id = body.get("canvasId")
+        if not canvas_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="canvasId is required",
+            )
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        node_id = body.get("nodeId")
+        if not node_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="nodeId is required",
+            )
+
+        valid, error_msg = validate_node_id(node_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        file_id = body.get("fileId")
+        s3_key = body.get("s3Key")
+        if not file_id and not s3_key:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="fileId or s3Key is required",
+            )
+
+        node = get_node(canvas_id, node_id)
+        if not node:
+            return error_response(
+                code="NOT_FOUND",
+                message="Node not found",
+                status_code=404,
+            )
+
+        file_item = None
+        for slot in ["inputs", "outputs", "evidence"]:
+            items = node.get(slot, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if item.get("type") != "file":
+                    continue
+                if file_id and item.get("fileId") == file_id:
+                    file_item = item
+                    break
+                if s3_key and item.get("s3Key") == s3_key:
+                    file_item = item
+                    break
+            if file_item:
+                break
+
+        if not file_item:
+            return error_response(
+                code="NOT_FOUND",
+                message="File not found on node",
+                status_code=404,
+            )
+
+        s3_key = file_item.get("s3Key")
+        if not s3_key:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="File item missing s3Key",
+            )
+
+        download_url = generate_presigned_get_url(s3_key)
+        if not download_url:
+            return internal_error_response("Failed to generate presigned URL")
+
+        return success_response({
+            "fileId": file_item.get("fileId"),
+            "s3Key": s3_key,
+            "filename": file_item.get("filename"),
+            "contentType": file_item.get("contentType", "application/octet-stream"),
+            "downloadUrl": download_url,
+            "expiresInSeconds": 3600,
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating presigned download URL: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to generate presigned URL")

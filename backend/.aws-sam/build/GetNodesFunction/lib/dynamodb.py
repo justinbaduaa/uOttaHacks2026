@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Key
 
 from .response import error_response, internal_error_response
+from .validation import normalize_evidence
 
 dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 canvas_table_name = os.environ["CANVAS_TABLE"]
@@ -109,14 +110,12 @@ def list_canvases_for_user(user_sub: str) -> List[Dict[str, Any]]:
 def find_canvas_by_join_code(join_code: str) -> Optional[Dict[str, Any]]:
     """
     Find canvas by join code.
-    
-    Note: This requires a scan operation. For production, consider adding a GSI
-    on joinCode, but for MVP we'll scan with a filter.
     """
     table = get_canvas_table()
     try:
-        response = table.scan(
-            FilterExpression=Attr("SK").eq("META") & Attr("joinCode").eq(join_code),
+        response = table.query(
+            IndexName="JoinCodeIndex",
+            KeyConditionExpression=Key("joinCode").eq(join_code),
         )
         items = response.get("Items", [])
         if not items:
@@ -214,6 +213,9 @@ def collect_subtree_nodes(canvas_id: str, root_node_id: str) -> List[str]:
 
 def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Transform DynamoDB node item to API format."""
+    evidence, evidence_error = normalize_evidence(item.get("evidence"))
+    if evidence_error:
+        evidence = []
     return {
         "nodeId": item.get("nodeId"),
         "canvasId": item.get("canvasId"),
@@ -222,6 +224,13 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "description": item.get("description"),
         "inputs": item.get("inputs", []),
         "outputs": item.get("outputs", []),
+        "evidence": evidence,
+        "status": item.get("status") or "draft",
+        "approvalMode": item.get("approvalMode"),
+        "assignedTo": item.get("assignedTo"),
+        "approvalRequests": item.get("approvalRequests", []),
+        "activityLog": item.get("activityLog", []),
+        "activeTaskId": item.get("activeTaskId"),
         "authorSub": item.get("authorSub"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
