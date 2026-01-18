@@ -10,6 +10,7 @@ from lib.dynamodb import (
     collect_subtree_nodes,
     get_node,
     get_nodes_table,
+    query_nodes_by_canvas,
     query_nodes_by_parent,
     require_membership,
 )
@@ -59,6 +60,7 @@ def get_nodes(event, context):
 
         # Get parent node ID (default to ROOT)
         parent_node_id = params.get("parentNodeId", "ROOT")
+        include_all = params.get("includeAll", "").lower() in ("1", "true", "yes")
 
         # Get updatedSince if provided
         updated_since = params.get("updatedSince")
@@ -68,10 +70,14 @@ def get_nodes(event, context):
                 return error_response(code="INVALID_REQUEST", message=error_msg)
 
         # Query nodes
-        nodes = query_nodes_by_parent(canvas_id, parent_node_id, updated_since)
+        if include_all:
+            nodes = query_nodes_by_canvas(canvas_id, updated_since)
+        else:
+            nodes = query_nodes_by_parent(canvas_id, parent_node_id, updated_since)
 
         logger.info(
-            f"Retrieved {len(nodes)} nodes for canvas {canvas_id}, parent {parent_node_id}"
+            f"Retrieved {len(nodes)} nodes for canvas {canvas_id}, "
+            f"parent {parent_node_id}, includeAll={include_all}"
         )
 
         return success_response(nodes)

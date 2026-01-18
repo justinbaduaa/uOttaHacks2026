@@ -171,6 +171,29 @@ def query_nodes_by_parent(
         return []
 
 
+def query_nodes_by_canvas(
+    canvas_id: str,
+    updated_since: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Query all nodes in a canvas, optionally filtering by updatedSince."""
+    table = get_nodes_table()
+    try:
+        query_params: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(f"CANVAS#{canvas_id}") & Key("SK").begins_with("NODE#"),
+        }
+        if updated_since:
+            query_params["FilterExpression"] = Attr("updatedAt").gt(updated_since)
+
+        response = table.query(**query_params)
+        items = response.get("Items", [])
+        nodes = []
+        for item in items:
+            nodes.append(_transform_node_item(item))
+        return nodes
+    except Exception:
+        return []
+
+
 def get_node(canvas_id: str, node_id: str) -> Optional[Dict[str, Any]]:
     """Get a single node by canvasId and nodeId."""
     table = get_nodes_table()
