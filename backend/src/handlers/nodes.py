@@ -1,4 +1,6 @@
 """Node-related Lambda handlers."""
+from lib.sentry import init_sentry
+init_sentry()
 
 import uuid
 from datetime import datetime

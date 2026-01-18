@@ -1,4 +1,6 @@
 """File upload/download Lambda handlers."""
+from lib.sentry import init_sentry
+init_sentry()
 
 import os
 import uuid
