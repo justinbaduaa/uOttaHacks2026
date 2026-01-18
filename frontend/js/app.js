@@ -10,6 +10,7 @@
 const App = {
   currentNodeId: null,
   navigationHistory: [],
+  authToken: null,
   
   // DOM Elements
   elements: {},
@@ -18,9 +19,10 @@ const App = {
   // Initialization
   // ============================================
   
-  init() {
+  async init() {
     this.cacheElements();
     this.setupEventListeners();
+    await this.ensureAuth();
     this.renderRootNodes();
     this.populateTargetSelect();
     console.log('Glass Box initialized');
@@ -493,6 +495,37 @@ const App = {
   // ============================================
   // Utilities
   // ============================================
+
+  getStoredToken() {
+    return localStorage.getItem('glassbox.authToken');
+  },
+
+  setStoredToken(token) {
+    localStorage.setItem('glassbox.authToken', token);
+  },
+
+  async ensureAuth() {
+    const existing = this.getStoredToken();
+    if (existing) {
+      this.authToken = existing;
+      return;
+    }
+
+    if (!window.glassBox || !window.glassBox.startAuth) {
+      console.warn('Auth bridge not available. Cannot start Hosted UI login.');
+      return;
+    }
+
+    try {
+      const token = await window.glassBox.startAuth();
+      if (token) {
+        this.setStoredToken(token);
+        this.authToken = token;
+      }
+    } catch (error) {
+      console.error('Authentication failed:', error);
+    }
+  },
   
   escapeHtml(text) {
     const div = document.createElement('div');

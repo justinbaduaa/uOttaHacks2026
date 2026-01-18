@@ -123,3 +123,40 @@ def validate_inputs_outputs(items: List[Dict]) -> Tuple[bool, Optional[str]]:
             return False, error
     
     return True, None
+
+
+def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Normalize and validate evidence payload.
+    
+    Evidence format:
+      {
+        "notes": ["text", ...] | "text",
+        "files": [file_item, ...]
+      }
+    """
+    if evidence is None:
+        return {"notes": [], "files": []}, None
+
+    if not isinstance(evidence, dict):
+        return None, "evidence must be an object"
+
+    notes = evidence.get("notes", [])
+    files = evidence.get("files", [])
+
+    if isinstance(notes, str):
+        notes = [notes]
+    if not isinstance(notes, list):
+        return None, "evidence.notes must be a string or array of strings"
+    for note in notes:
+        if not isinstance(note, str):
+            return None, "evidence.notes must contain only strings"
+
+    if not isinstance(files, list):
+        return None, "evidence.files must be an array"
+    for item in files:
+        valid, error = validate_file_item(item)
+        if not valid:
+            return None, f"evidence.files: {error}"
+
+    return {"notes": notes, "files": files}, None

@@ -14,6 +14,7 @@ from lib.validation import (
     validate_canvas_id,
     validate_file_slot,
     validate_node_id,
+    normalize_evidence,
 )
 
 logger = get_logger(__name__)
@@ -239,6 +240,9 @@ def complete_file(event, context):
         )
 
         updated_item = response["Attributes"]
+        evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+        if evidence_error:
+            evidence = {"notes": [], "files": []}
 
         logger.info(
             f"Completed file upload for node {node_id} in canvas {canvas_id}: "
@@ -254,6 +258,7 @@ def complete_file(event, context):
             "description": updated_item["description"],
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
+            "evidence": evidence,
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],

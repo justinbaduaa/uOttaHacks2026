@@ -58,17 +58,30 @@
 
         <div class="sidebar-section">
           <div class="section-header">
-            <span>GLASS BOXES</span>
-            <button class="add-btn">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="16"/>
-                <line x1="8" y1="12" x2="16" y2="12"/>
-              </svg>
-            </button>
+            <span>CANVASES</span>
           </div>
           <div class="glass-boxes-list" id="sidebarBoxesList">
             <!-- Populated by JS -->
+          </div>
+          <div class="canvas-create" id="canvasCreate">
+            <button class="canvas-create-toggle" id="canvasCreateToggle">
+              <span class="canvas-create-icon">+</span>
+              <span>New canvas</span>
+            </button>
+            <div class="canvas-create-form" id="canvasCreateForm">
+              <input
+                type="text"
+                id="canvasCreateInput"
+                class="canvas-create-input"
+                placeholder="Name your canvas..."
+                maxlength="40"
+              />
+              <div class="canvas-create-actions">
+                <button class="canvas-create-submit" id="canvasCreateSubmit">Create</button>
+                <button class="canvas-create-cancel" id="canvasCreateCancel">Cancel</button>
+              </div>
+              <div class="canvas-create-error" id="canvasCreateError"></div>
+            </div>
           </div>
         </div>
       </aside>
@@ -79,6 +92,11 @@
           <nav class="breadcrumb" id="breadcrumb">
             <button class="breadcrumb-item active" data-id="root">Workspace</button>
           </nav>
+          <div class="header-actions">
+            <button class="profile-chip" id="userProfile" aria-label="User profile">
+              <span class="profile-letter" id="userProfileLetter">?</span>
+            </button>
+          </div>
         </header>
 
         <!-- Canvas Container -->
@@ -86,11 +104,14 @@
           <div class="canvas" id="canvas">
             <!-- Nodes will be rendered here -->
           </div>
+          <div class="canvas-loading" id="canvasLoading" hidden>
+            <div class="spinner"></div>
+            <span>Loading nodes...</span>
+          </div>
         </div>
       </main>
     </div>
 
-    <script src="js/data.js"></script>
     <script src="js/canvas.js"></script>
   </body>
 </html>

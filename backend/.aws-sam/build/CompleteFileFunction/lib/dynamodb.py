@@ -8,6 +8,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from .response import error_response, internal_error_response
+from .validation import normalize_evidence
 
 dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 canvas_table_name = os.environ["CANVAS_TABLE"]
@@ -170,6 +171,29 @@ def query_nodes_by_parent(
         return []
 
 
+def query_nodes_by_canvas(
+    canvas_id: str,
+    updated_since: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Query all nodes in a canvas, optionally filtering by updatedSince."""
+    table = get_nodes_table()
+    try:
+        query_params: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(f"CANVAS#{canvas_id}") & Key("SK").begins_with("NODE#"),
+        }
+        if updated_since:
+            query_params["FilterExpression"] = Attr("updatedAt").gt(updated_since)
+
+        response = table.query(**query_params)
+        items = response.get("Items", [])
+        nodes = []
+        for item in items:
+            nodes.append(_transform_node_item(item))
+        return nodes
+    except Exception:
+        return []
+
+
 def get_node(canvas_id: str, node_id: str) -> Optional[Dict[str, Any]]:
     """Get a single node by canvasId and nodeId."""
     table = get_nodes_table()
@@ -214,6 +238,9 @@ def collect_subtree_nodes(canvas_id: str, root_node_id: str) -> List[str]:
 
 def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Transform DynamoDB node item to API format."""
+    evidence, evidence_error = normalize_evidence(item.get("evidence"))
+    if evidence_error:
+        evidence = {"notes": [], "files": []}
     return {
         "nodeId": item.get("nodeId"),
         "canvasId": item.get("canvasId"),
@@ -222,6 +249,7 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "description": item.get("description"),
         "inputs": item.get("inputs", []),
         "outputs": item.get("outputs", []),
+        "evidence": evidence,
         "authorSub": item.get("authorSub"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
