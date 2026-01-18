@@ -133,6 +133,8 @@ def create_node(event, context):
         inputs = body.get("inputs", [])
         outputs = body.get("outputs", [])
         evidence = body.get("evidence")
+        position_x = body.get("x")
+        position_y = body.get("y")
 
         # Validate inputs/outputs
         if inputs:
@@ -149,30 +151,47 @@ def create_node(event, context):
         if evidence_error:
             return error_response(code="INVALID_REQUEST", message=evidence_error)
 
+        if position_x is not None or position_y is not None:
+            if position_x is None or position_y is None:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be provided together",
+                )
+            if not isinstance(position_x, (int, float)) or not isinstance(position_y, (int, float)):
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be numbers",
+                )
+
         # Generate node ID
         node_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat() + "Z"
 
         # Create node item
+        item = {
+            "PK": f"CANVAS#{canvas_id}",
+            "SK": f"NODE#{node_id}",
+            "GSI1PK": f"CANVAS#{canvas_id}#PARENT#{parent_node_id}",
+            "GSI1SK": f"UPDATED#{now}#NODE#{node_id}",
+            "nodeId": node_id,
+            "canvasId": canvas_id,
+            "parentNodeId": parent_node_id,
+            "title": title,
+            "description": description,
+            "inputs": inputs or [],
+            "outputs": outputs or [],
+            "evidence": normalized_evidence,
+            "authorSub": user_sub,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        if position_x is not None and position_y is not None:
+            item["x"] = float(position_x)
+            item["y"] = float(position_y)
+
         table = get_nodes_table()
         table.put_item(
-            Item={
-                "PK": f"CANVAS#{canvas_id}",
-                "SK": f"NODE#{node_id}",
-                "GSI1PK": f"CANVAS#{canvas_id}#PARENT#{parent_node_id}",
-                "GSI1SK": f"UPDATED#{now}#NODE#{node_id}",
-                "nodeId": node_id,
-                "canvasId": canvas_id,
-                "parentNodeId": parent_node_id,
-                "title": title,
-                "description": description,
-                "inputs": inputs or [],
-                "outputs": outputs or [],
-                "evidence": normalized_evidence,
-                "authorSub": user_sub,
-                "createdAt": now,
-                "updatedAt": now,
-            }
+            Item=item
         )
 
         logger.info(f"Created node {node_id} in canvas {canvas_id}")
@@ -190,6 +209,9 @@ def create_node(event, context):
             "createdAt": now,
             "updatedAt": now,
         }
+        if position_x is not None and position_y is not None:
+            node["x"] = float(position_x)
+            node["y"] = float(position_y)
 
         return success_response(node)
 
@@ -299,6 +321,26 @@ def update_node(event, context):
             update_expressions.append("evidence = :evidence")
             expression_attribute_values[":evidence"] = normalized_evidence
 
+        if "x" in body or "y" in body:
+            if "x" not in body or "y" not in body:
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be provided together",
+                )
+            position_x = body.get("x")
+            position_y = body.get("y")
+            if not isinstance(position_x, (int, float)) or not isinstance(position_y, (int, float)):
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="x and y must be numbers",
+                )
+            update_expressions.append("#x = :x")
+            update_expressions.append("#y = :y")
+            expression_attribute_names["#x"] = "x"
+            expression_attribute_names["#y"] = "y"
+            expression_attribute_values[":x"] = float(position_x)
+            expression_attribute_values[":y"] = float(position_y)
+
         # Execute update
         table = get_nodes_table()
         update_expression = ", ".join(update_expressions)
@@ -339,6 +381,9 @@ def update_node(event, context):
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
         }
+        if "x" in updated_item and "y" in updated_item:
+            updated_node["x"] = float(updated_item["x"])
+            updated_node["y"] = float(updated_item["y"])
 
         return success_response(updated_node)
 

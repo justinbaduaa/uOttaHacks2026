@@ -241,6 +241,8 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
     evidence, evidence_error = normalize_evidence(item.get("evidence"))
     if evidence_error:
         evidence = {"notes": [], "files": []}
+    position_x = item.get("x")
+    position_y = item.get("y")
     return {
         "nodeId": item.get("nodeId"),
         "canvasId": item.get("canvasId"),
@@ -253,6 +255,8 @@ def _transform_node_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "authorSub": item.get("authorSub"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
+        "x": float(position_x) if position_x is not None else None,
+        "y": float(position_y) if position_y is not None else None,
     }
 
 
