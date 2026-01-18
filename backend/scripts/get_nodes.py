@@ -10,6 +10,7 @@ def main() -> None:
     parser.add_argument("--parent-node-id", default=os.getenv("PARENT_NODE_ID", ""), help="Parent node ID")
     parser.add_argument("--updated-since", default=os.getenv("UPDATED_SINCE", ""), help="ISO8601 timestamp")
     parser.add_argument("--include-all", action="store_true", help="Fetch all nodes in the canvas")
+    parser.add_argument("--include-deleted", action="store_true", help="Include soft-deleted nodes")
     parser.add_argument("--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")
     parser.add_argument("--auth-token", default=os.getenv("AUTH_TOKEN", ""), help="Bearer token or raw token")
     args = parser.parse_args()
@@ -26,6 +27,8 @@ def main() -> None:
         log("Updated since: " + args.updated_since)
     if args.include_all:
         log("Include all nodes: true")
+    if args.include_deleted:
+        log("Include deleted nodes: true")
 
     query = {
         "canvasId": canvas_id,
@@ -34,6 +37,8 @@ def main() -> None:
     }
     if args.include_all:
         query["includeAll"] = "true"
+    if args.include_deleted:
+        query["includeDeleted"] = "true"
 
     request_json(
         method="GET",

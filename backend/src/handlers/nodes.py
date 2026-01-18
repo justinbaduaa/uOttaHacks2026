@@ -6,10 +6,10 @@ from typing import Dict, List
 
 from lib.auth import require_auth
 from lib.dynamodb import (
-    batch_delete_nodes,
     collect_subtree_nodes,
     get_node,
     get_nodes_table,
+    mark_nodes_deleted,
     query_nodes_by_canvas,
     query_nodes_by_parent,
     require_membership,
@@ -61,6 +61,7 @@ def get_nodes(event, context):
         # Get parent node ID (default to ROOT)
         parent_node_id = params.get("parentNodeId", "ROOT")
         include_all = params.get("includeAll", "").lower() in ("1", "true", "yes")
+        include_deleted = params.get("includeDeleted", "").lower() in ("1", "true", "yes")
 
         # Get updatedSince if provided
         updated_since = params.get("updatedSince")
@@ -71,13 +72,18 @@ def get_nodes(event, context):
 
         # Query nodes
         if include_all:
-            nodes = query_nodes_by_canvas(canvas_id, updated_since)
+            nodes = query_nodes_by_canvas(canvas_id, updated_since, include_deleted=include_deleted)
         else:
-            nodes = query_nodes_by_parent(canvas_id, parent_node_id, updated_since)
+            nodes = query_nodes_by_parent(
+                canvas_id,
+                parent_node_id,
+                updated_since,
+                include_deleted=include_deleted,
+            )
 
         logger.info(
             f"Retrieved {len(nodes)} nodes for canvas {canvas_id}, "
-            f"parent {parent_node_id}, includeAll={include_all}"
+            f"parent {parent_node_id}, includeAll={include_all}, includeDeleted={include_deleted}"
         )
 
         return success_response(nodes)
@@ -187,6 +193,7 @@ def create_node(event, context):
             "outputs": outputs or [],
             "evidence": normalized_evidence,
             "authorSub": user_sub,
+            "deletedAt": None,
             "createdAt": now,
             "updatedAt": now,
         }
@@ -336,6 +343,7 @@ def update_node(event, context):
             "outputs": updated_item.get("outputs", []),
             "evidence": evidence,
             "authorSub": updated_item["authorSub"],
+            "deletedAt": updated_item.get("deletedAt"),
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
         }
@@ -397,7 +405,6 @@ def delete_node(event, context):
             })
 
         # Get all nodes to extract S3 keys
-        table = get_nodes_table()
         nodes_to_delete = []
         for nid in subtree_node_ids:
             node = get_node(canvas_id, nid)
@@ -411,7 +418,13 @@ def delete_node(event, context):
         deleted_file_count = batch_delete_s3_objects(s3_keys)
 
         # Delete nodes from DynamoDB
-        deleted_node_count = batch_delete_nodes(canvas_id, subtree_node_ids)
+        deleted_at = datetime.utcnow().isoformat() + "Z"
+        deleted_node_count = mark_nodes_deleted(
+            canvas_id,
+            subtree_node_ids,
+            deleted_at,
+            user_sub,
+        )
 
         logger.info(
             f"Deleted {deleted_node_count} nodes and {deleted_file_count} files "

@@ -260,6 +260,7 @@ def complete_file(event, context):
             "outputs": updated_item.get("outputs", []),
             "evidence": evidence,
             "authorSub": updated_item["authorSub"],
+            "deletedAt": updated_item.get("deletedAt"),
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
         }
