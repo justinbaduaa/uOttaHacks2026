@@ -2131,17 +2131,49 @@ const Canvas = {
     if (usersList.length > 0) {
        html += `<div class="user-picker-section">Active Users</div>`;
        usersList.forEach(user => {
-         const name = user.name || 'Anonymous';
-         const initials = name.substring(0, 2).toUpperCase();
-         const color = user.color || '#3b82f6';
+         // Resolve Name
+         let displayName = user.name;
+         if (!displayName) {
+            if (user.email) {
+               displayName = user.email.split('@')[0]; // Use part before @
+            } else if (user.sub) {
+               // Fallback: "User 1234"
+               const suffix = user.sub.slice(-4);
+               displayName = `User ${suffix}`;
+            } else {
+               displayName = 'Anonymous';
+            }
+         }
+
+         // Initials
+         let initials = '?';
+         if (displayName !== 'Anonymous') {
+            initials = displayName.substring(0, 2).toUpperCase();
+            if (displayName.includes(' ')) {
+               const parts = displayName.split(' ');
+               if (parts.length > 1) {
+                  initials = (parts[0][0] + parts[1][0]).toUpperCase();
+               }
+            }
+         }
+
+         // Color
+         let color = user.color;
+         if (!color) {
+            // Hash sub to pick a color
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#6366f1'];
+            const hash = (user.sub || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            color = colors[hash % colors.length];
+         }
+
          html += `
-           <button class="user-option" data-type="user" data-id="${this.escapeHtml(user.sub)}" data-name="${this.escapeHtml(name)}" data-initials="${initials}" data-color="${color}">
+           <button class="user-option" data-type="user" data-id="${this.escapeHtml(user.sub)}" data-name="${this.escapeHtml(displayName)}" data-initials="${initials}" data-color="${color}">
              <div class="user-option-avatar is-user" style="background: ${color}">
                ${initials}
                <span class="user-option-active"></span>
              </div>
              <div class="user-option-info">
-               <span class="user-option-name">${this.escapeHtml(name)}</span>
+               <span class="user-option-name">${this.escapeHtml(displayName)}</span>
                <span class="user-option-status">Active now</span>
              </div>
            </button>

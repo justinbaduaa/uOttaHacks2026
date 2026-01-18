@@ -28,16 +28,6 @@
           </div>
         </div>
 
-        <div class="project-selector">
-          <div class="project-avatar">sb</div>
-          <span class="project-name">secondbrain V1</span>
-          <i
-            data-lucide="chevron-down"
-            class="dropdown-icon"
-            style="width: 12px; height: 12px"
-          ></i>
-        </div>
-
         <div class="sidebar-separator"></div>
 
         <nav class="sidebar-nav">
@@ -65,11 +55,15 @@
         <div class="canvas-create" id="canvasCreate">
           <div class="canvas-actions">
             <div class="canvas-action-row">
-              <button class="canvas-action-split" id="canvasCreateToggle">New</button>
+              <button class="canvas-action-split" id="canvasCreateToggle">
+                New
+              </button>
               <div class="canvas-action-divider"></div>
-              <button class="canvas-action-split" id="canvasJoinToggle">Join</button>
+              <button class="canvas-action-split" id="canvasJoinToggle">
+                Join
+              </button>
             </div>
-            
+
             <div class="canvas-action-form" id="canvasCreateForm">
               <input
                 type="text"
@@ -79,8 +73,12 @@
                 maxlength="40"
               />
               <div class="canvas-action-actions">
-                <button class="canvas-action-submit" id="canvasCreateSubmit">Create</button>
-                <button class="canvas-action-cancel" id="canvasCreateCancel">Cancel</button>
+                <button class="canvas-action-submit" id="canvasCreateSubmit">
+                  Create
+                </button>
+                <button class="canvas-action-cancel" id="canvasCreateCancel">
+                  Cancel
+                </button>
               </div>
               <div class="canvas-action-error" id="canvasCreateError"></div>
             </div>
@@ -94,8 +92,12 @@
                 maxlength="10"
               />
               <div class="canvas-action-actions">
-                <button class="canvas-action-submit" id="canvasJoinSubmit">Join</button>
-                <button class="canvas-action-cancel" id="canvasJoinCancel">Cancel</button>
+                <button class="canvas-action-submit" id="canvasJoinSubmit">
+                  Join
+                </button>
+                <button class="canvas-action-cancel" id="canvasJoinCancel">
+                  Cancel
+                </button>
               </div>
               <div class="canvas-action-error" id="canvasJoinError"></div>
             </div>
@@ -113,14 +115,20 @@
           </nav>
           <div class="header-actions">
             <div class="canvas-code" id="canvasCode">
-              <button class="canvas-code-button" id="canvasCodeToggle">Code</button>
+              <button class="canvas-code-button" id="canvasCodeToggle">
+                Code
+              </button>
               <div class="canvas-code-panel" id="canvasCodePanel" hidden>
                 <div class="canvas-code-title">Canvas Code</div>
                 <div class="canvas-code-value" id="canvasCodeValue">--</div>
                 <div class="canvas-code-hint" id="canvasCodeHint"></div>
               </div>
             </div>
-            <div class="presence-stack" id="presenceStack" aria-label="Active collaborators"></div>
+            <div
+              class="presence-stack"
+              id="presenceStack"
+              aria-label="Active collaborators"
+            ></div>
             <button
               class="profile-chip"
               id="userProfile"
