@@ -1316,3 +1316,54 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ========================================
+   Presence / Collaborator Indicators
+   ======================================== */
+
+.presence-stack {
+  display: flex;
+  align-items: center;
+  flex-direction: row-reverse;
+  margin-right: var(--space-2);
+}
+
+.presence-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--bg-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  margin-left: -8px;
+}
+
+.presence-avatar:first-child {
+  margin-left: 0;
+}
+
+.presence-avatar:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: var(--shadow-md);
+  z-index: 10 !important;
+}
+
+.presence-avatar.is-me {
+  background: linear-gradient(135deg, #8B5CF6, #EC4899);
+}
+
+.presence-avatar.is-more {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: default;
+}
+

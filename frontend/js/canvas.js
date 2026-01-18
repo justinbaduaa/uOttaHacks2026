@@ -95,10 +95,10 @@ const Api = {
     return Promise.reject(new Error('API bridge unavailable'));
   },
 
-  listNodes(canvasId) {
+  listNodes(canvasId, updatedSince) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.listNodes) {
-      return window.glassBox.api.listNodes(token, canvasId);
+      return window.glassBox.api.listNodes(token, canvasId, updatedSince);
     }
     return Promise.reject(new Error('API bridge unavailable'));
   },
@@ -131,6 +131,9 @@ const Canvas = {
     nodes: [],
     nodesById: {},
     childrenByParent: {},
+    lastSyncByCanvas: {},
+    activeUsers: [],
+    activeUsersKey: '',
     isLoadingCanvases: false,
     isLoadingNodes: false,
     isCreatingCanvas: false,
@@ -146,12 +149,17 @@ const Canvas = {
   canvasOffset: { x: 0, y: 0 },
   scale: 1,
   currentPath: [],
+  pollIntervalMs: 7000,
+  pollTimer: null,
+  pollInFlight: false,
+  presenceMaxVisible: 5,
 
   init() {
     this.container = document.getElementById('canvasContainer');
     this.canvas = document.getElementById('canvas');
     this.sidebarList = document.getElementById('sidebarBoxesList');
     this.breadcrumb = document.getElementById('breadcrumb');
+    this.presenceStack = document.getElementById('presenceStack');
     this.profileButton = document.getElementById('userProfile');
     this.profileLetter = document.getElementById('userProfileLetter');
     this.canvasLoading = document.getElementById('canvasLoading');
@@ -629,13 +637,18 @@ const Canvas = {
     if (!canvasId || this.state.selectedCanvasId === canvasId) {
       return;
     }
+    this.stopPolling();
     this.state.selectedCanvasId = canvasId;
     this.currentPath = [];
     this.hideNodeCreatePopover();
     this.hideNodeDeletePopover();
+    this.setActiveUsers([]);
     this.renderSidebar();
     this.updateBreadcrumb();
     await this.loadNodesForCanvas(canvasId);
+    if (this.state.selectedCanvasId === canvasId) {
+      this.startPolling();
+    }
   },
 
   async loadNodesForCanvas(canvasId) {
@@ -645,17 +658,24 @@ const Canvas = {
 
     try {
       console.log('[Canvas] Loading nodes for canvas', canvasId);
-      const nodes = await Api.listNodes(canvasId);
+      const payload = await Api.listNodes(canvasId);
+      const { nodes, activeUsers } = this.normalizeNodesPayload(payload);
+      this.setActiveUsers(activeUsers);
       console.log('[Canvas] Loaded nodes', Array.isArray(nodes) ? nodes.length : nodes);
       const normalized = (nodes || [])
         .filter(node => !node.deletedAt)
         .map(node => this.normalizeNodeFromApi(node));
       this.state.nodes = normalized;
+      const latestUpdate = this.getLatestUpdatedAt(normalized);
+      if (latestUpdate) {
+        this.state.lastSyncByCanvas[canvasId] = latestUpdate;
+      }
       this.buildNodeIndex();
       this.refreshCurrentView();
     } catch (error) {
       console.error('[Canvas] Failed to load nodes', error);
       this.state.nodes = [];
+      this.setActiveUsers([]);
       this.buildNodeIndex();
       this.renderNodes([]);
       this.canvas.innerHTML = `
@@ -1491,6 +1511,294 @@ const Canvas = {
     if (this.profileButton && email) {
       this.profileButton.title = email;
     }
+  },
+
+  // ========== Collaborative Polling Functions ==========
+
+  startPolling() {
+    this.stopPolling();
+    if (!this.state.selectedCanvasId || !Api.getAuthToken()) {
+      return;
+    }
+    console.log('[Canvas] Starting polling every', this.pollIntervalMs, 'ms');
+    this.pollTimer = setInterval(() => {
+      this.pollNodes();
+    }, this.pollIntervalMs);
+  },
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+      console.log('[Canvas] Stopped polling');
+    }
+    this.pollInFlight = false;
+  },
+
+  async pollNodes() {
+    if (this.pollInFlight) return;
+    const canvasId = this.state.selectedCanvasId;
+    if (!canvasId || !Api.getAuthToken()) {
+      this.stopPolling();
+      return;
+    }
+    if (this.state.isLoadingNodes) {
+      return;
+    }
+
+    this.pollInFlight = true;
+    try {
+      const updatedSince = this.getUpdatedSinceForPoll(canvasId);
+      console.log('[Canvas] Polling nodes since:', updatedSince || '(initial)');
+      const payload = await Api.listNodes(canvasId, updatedSince);
+      const { nodes, activeUsers } = this.normalizeNodesPayload(payload);
+      this.setActiveUsers(activeUsers);
+      if (!Array.isArray(nodes) || nodes.length === 0) {
+        return;
+      }
+      const normalized = nodes.map(node => this.normalizeNodeFromApi(node));
+      const latestUpdate = this.getLatestUpdatedAt(normalized);
+      this.applyPolledNodeUpdates(normalized);
+      if (latestUpdate) {
+        this.state.lastSyncByCanvas[canvasId] = latestUpdate;
+      }
+    } catch (error) {
+      console.warn('[Canvas] Polling failed', error);
+    } finally {
+      this.pollInFlight = false;
+    }
+  },
+
+  normalizeNodesPayload(payload) {
+    if (Array.isArray(payload)) {
+      return { nodes: payload, activeUsers: [] };
+    }
+    if (payload && Array.isArray(payload.nodes)) {
+      return {
+        nodes: payload.nodes,
+        activeUsers: payload.activeUsers || payload.presence || payload.active_users || [],
+      };
+    }
+    return { nodes: [], activeUsers: [] };
+  },
+
+  applyPolledNodeUpdates(incomingNodes) {
+    if (!incomingNodes || incomingNodes.length === 0) {
+      return;
+    }
+
+    const renderedById = new Map(this.nodes.map(node => [node.data.id, node]));
+    let needsRefresh = false;
+
+    incomingNodes.forEach((incoming) => {
+      if (incoming.deletedAt) {
+        // Node was deleted
+        const rendered = renderedById.get(incoming.id);
+        if (rendered) {
+          rendered.element.remove();
+          this.nodes = this.nodes.filter(node => node.data.id !== incoming.id);
+        }
+        this.state.nodes = this.state.nodes.filter(node => node.id !== incoming.id);
+        needsRefresh = true;
+        return;
+      }
+
+      const existing = this.state.nodesById[incoming.id];
+      if (existing) {
+        // Update existing node
+        Object.assign(existing, incoming);
+        const rendered = renderedById.get(incoming.id);
+        if (rendered) {
+          Object.assign(rendered.data, incoming);
+          // Update title and description in DOM
+          const titleEl = rendered.element.querySelector('.node-title');
+          const descEl = rendered.element.querySelector('.node-description');
+          if (titleEl) titleEl.textContent = incoming.name || 'Untitled';
+          if (descEl) descEl.textContent = incoming.goal || 'Description';
+        }
+      } else {
+        // New node
+        this.state.nodes.push(incoming);
+        needsRefresh = true;
+      }
+    });
+
+    if (needsRefresh) {
+      this.buildNodeIndex();
+      this.refreshCurrentView();
+    }
+  },
+
+  getLatestUpdatedAt(nodes) {
+    let latest = '';
+    (nodes || []).forEach((node) => {
+      const normalized = this.normalizeIsoTimestamp(node.updatedAt || '');
+      if (normalized && (!latest || normalized > latest)) {
+        latest = normalized;
+      }
+    });
+    return latest;
+  },
+
+  normalizeIsoTimestamp(timestamp) {
+    if (!timestamp || typeof timestamp !== 'string') {
+      return '';
+    }
+
+    const match = timestamp.match(
+      /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+    );
+    if (!match) {
+      return timestamp;
+    }
+
+    const base = match[1];
+    const fraction = match[2] ? match[2].slice(1) : '';
+    const zone = match[3];
+    const ms = fraction ? fraction.padEnd(3, '0').slice(0, 3) : '000';
+
+    return `${base}.${ms}${zone}`;
+  },
+
+  getUpdatedSinceForPoll(canvasId) {
+    const normalized = this.normalizeIsoTimestamp(this.state.lastSyncByCanvas[canvasId] || '');
+    if (!normalized) {
+      return '';
+    }
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return normalized;
+    }
+    parsed.setMilliseconds(parsed.getMilliseconds() - 1);
+    return parsed.toISOString();
+  },
+
+  // ========== Active Users / Presence Functions ==========
+
+  setActiveUsers(users) {
+    const normalized = this.normalizeActiveUsers(users);
+    const key = normalized.map(user => `${user.userId}:${user.displayName}:${user.lastActiveAt}`).join('|');
+    if (key === this.state.activeUsersKey) {
+      return;
+    }
+    this.state.activeUsers = normalized;
+    this.state.activeUsersKey = key;
+    this.renderPresence();
+  },
+
+  normalizeActiveUsers(users) {
+    if (!Array.isArray(users)) {
+      return [];
+    }
+    const currentUser = this.getCurrentUserProfile();
+    const seen = new Set();
+    const result = [];
+
+    users.forEach((user) => {
+      if (!user) return;
+      const userId = String(user.userId || user.sub || user.id || '').trim();
+      if (!userId || userId === currentUser.userId || seen.has(userId)) {
+        return;
+      }
+      const displayName = String(
+        user.displayName || user.name || user.email || `User ${userId.slice(-4)}`
+      );
+      const initial = String(user.initial || this.getInitials(displayName) || '?');
+      const lastActiveAt = user.lastActiveAt || '';
+      result.push({
+        userId,
+        displayName,
+        initial,
+        lastActiveAt,
+      });
+      seen.add(userId);
+    });
+
+    return result.sort((a, b) => {
+      const aTime = a.lastActiveAt ? Date.parse(a.lastActiveAt) : 0;
+      const bTime = b.lastActiveAt ? Date.parse(b.lastActiveAt) : 0;
+      return aTime - bTime;
+    });
+  },
+
+  renderPresence() {
+    if (!this.presenceStack) return;
+    const currentUser = this.getCurrentUserProfile();
+    const maxVisible = Math.max(2, this.presenceMaxVisible);
+    const maxOthers = maxVisible - 1;
+    let visibleOthers = this.state.activeUsers.slice(0, maxOthers);
+    let extraCount = this.state.activeUsers.length - maxOthers;
+
+    if (extraCount > 0) {
+      visibleOthers = this.state.activeUsers.slice(0, Math.max(1, maxOthers - 1));
+      extraCount = this.state.activeUsers.length - visibleOthers.length;
+    } else {
+      extraCount = 0;
+    }
+
+    const displayUsers = [...visibleOthers];
+    if (extraCount > 0) {
+      displayUsers.push({ type: 'more', count: extraCount });
+    }
+    displayUsers.push({ ...currentUser, isMe: true });
+
+    const fragment = document.createDocumentFragment();
+    displayUsers.forEach((user, index) => {
+      const isMore = user.type === 'more';
+      const element = document.createElement(isMore ? 'div' : 'button');
+      element.className = `profile-chip presence-avatar${isMore ? ' is-more' : ''}${user.isMe ? ' is-me' : ''}`;
+      element.style.zIndex = String(index + 1);
+
+      if (isMore) {
+        element.textContent = `+${user.count}`;
+        element.title = `${user.count} more collaborators`;
+      } else {
+        element.textContent = user.initial || '?';
+        element.title = user.displayName || 'User';
+        element.style.background = this.getAvatarGradient(user.userId, user.isMe);
+      }
+
+      if (element.tagName === 'BUTTON') {
+        element.type = 'button';
+        element.setAttribute('aria-label', element.title);
+      }
+
+      fragment.appendChild(element);
+    });
+
+    this.presenceStack.innerHTML = '';
+    this.presenceStack.appendChild(fragment);
+  },
+
+  getCurrentUserProfile() {
+    const payload = Auth.token ? parseJwt(Auth.token) : null;
+    const userId = payload && payload.sub ? String(payload.sub) : 'me';
+    const email = payload && payload.email ? String(payload.email) : '';
+    const username = payload && (payload['cognito:username'] || payload.username)
+      ? String(payload['cognito:username'] || payload.username)
+      : '';
+    const displayName = email || username || `User ${userId.slice(-4)}`;
+    const initial = this.getInitials(displayName);
+
+    return { userId, displayName, initial };
+  },
+
+  getAvatarGradient(userId, isMe) {
+    if (isMe) {
+      return 'linear-gradient(135deg, #8B5CF6, #EC4899)';
+    }
+    const gradients = [
+      'linear-gradient(135deg, #22A47F, #6EE7B7)',
+      'linear-gradient(135deg, #60A5FA, #38BDF8)',
+      'linear-gradient(135deg, #F59E0B, #FBBF24)',
+      'linear-gradient(135deg, #F472B6, #FB7185)',
+      'linear-gradient(135deg, #A5B4FC, #818CF8)',
+    ];
+    let hash = 0;
+    for (let i = 0; i < userId.length; i += 1) {
+      hash = (hash * 31 + userId.charCodeAt(i)) % gradients.length;
+    }
+    return gradients[hash];
   }
 };
 
