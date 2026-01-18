@@ -8,11 +8,16 @@ if (process.platform === "darwin") {
   app.name = "GlassBox";
 }
 
-const COGNITO_DOMAIN = "https://glassbox-846532307761-us-east-1.auth.us-east-1.amazoncognito.com";
-const COGNITO_CLIENT_ID = "3pmncf4qmok3oa6e7otpk17j0e";
-const COGNITO_REDIRECT_URI = "http://localhost:8787/callback";
-const COGNITO_SCOPES = "openid email profile";
-const API_BASE_URL = "https://58icbv6e7h.execute-api.us-east-1.amazonaws.com";
+const COGNITO_DOMAIN =
+  process.env.COGNITO_DOMAIN ||
+  "https://glassbox-976193219778-us-east-1.auth.us-east-1.amazoncognito.com";
+const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID || "2fdcvcq5cog9s18c4ep0vqm02t";
+const COGNITO_REDIRECT_URI =
+  process.env.COGNITO_REDIRECT_URI || "http://localhost:8787/callback";
+const COGNITO_SCOPES = process.env.COGNITO_SCOPES || "openid email profile";
+const API_BASE_URL = (
+  process.env.API_BASE_URL || "https://3bll02uttk.execute-api.us-east-1.amazonaws.com"
+).trim();
 const API_TIMEOUT_MS = 15000;
 const GATEWAY_BASE_URL = process.env.GATEWAY_BASE_URL || "http://13.218.40.115:8001";
 
@@ -20,6 +25,42 @@ let mainWindow;
 let authWindow;
 let authInFlight;
 const gatewayStreams = new Map();
+
+const SENSITIVE_KEY_PATTERN = /(token|authorization|secret)/i;
+
+function sanitizeForLog(value, depth = 0) {
+  if (depth > 4) {
+    return "[truncated]";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForLog(item, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const sanitized = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (SENSITIVE_KEY_PATTERN.test(key)) {
+        sanitized[key] = "[redacted]";
+      } else {
+        sanitized[key] = sanitizeForLog(item, depth + 1);
+      }
+    }
+    return sanitized;
+  }
+  return value;
+}
+
+function normalizeAuthPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+  return {
+    idToken: payload.id_token || payload.idToken || "",
+    accessToken: payload.access_token || payload.accessToken || "",
+    refreshToken: payload.refresh_token || payload.refreshToken || "",
+    expiresIn: payload.expires_in || payload.expiresIn || null,
+    tokenType: payload.token_type || payload.tokenType || "",
+  };
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -129,7 +170,46 @@ async function exchangeCodeForToken(code, verifier) {
     throw new Error(message);
   }
 
-  return payload.id_token;
+  const normalized = normalizeAuthPayload(payload);
+  if (!normalized.idToken) {
+    throw new Error("Token exchange failed: missing id_token");
+  }
+  return normalized;
+}
+
+async function refreshAuthToken(refreshToken) {
+  if (!refreshToken) {
+    throw new Error("Missing refresh token");
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: COGNITO_CLIENT_ID,
+    refresh_token: refreshToken,
+  });
+
+  const response = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    const message = payload.error_description || payload.error || "Token refresh failed";
+    throw new Error(message);
+  }
+
+  const normalized = normalizeAuthPayload(payload);
+  if (!normalized.idToken) {
+    throw new Error("Token refresh failed: missing id_token");
+  }
+  if (!normalized.refreshToken) {
+    normalized.refreshToken = refreshToken;
+  }
+  return normalized;
 }
 
 async function startAuthFlow() {
@@ -155,8 +235,8 @@ async function startAuthFlow() {
         }
 
         try {
-          const token = await exchangeCodeForToken(result.code, verifier);
-          resolve(token);
+          const tokenPayload = await exchangeCodeForToken(result.code, verifier);
+          resolve(tokenPayload);
         } catch (exchangeError) {
           reject(exchangeError);
         } finally {
@@ -214,6 +294,7 @@ app.on("activate", () => {
 });
 
 ipcMain.handle("start-auth", async () => startAuthFlow());
+ipcMain.handle("refresh-auth", async (_event, refreshToken) => refreshAuthToken(refreshToken));
 
 async function apiRequest({ path, method = "GET", body, token }) {
   if (!token) {
@@ -224,7 +305,7 @@ async function apiRequest({ path, method = "GET", body, token }) {
   const startTime = Date.now();
   console.log(`[API] -> ${method} ${url}`);
   if (body) {
-    console.log(`[API] payload: ${JSON.stringify(body)}`);
+    console.log(`[API] payload: ${JSON.stringify(sanitizeForLog(body))}`);
   }
 
   const controller = new AbortController();
@@ -464,6 +545,24 @@ ipcMain.handle("api-update-node", async (event, { token, nodeId, payload }) => {
   if (payload.description !== undefined) {
     body.description = payload.description;
   }
+  if (payload.assignedTo !== undefined) {
+    body.assignedTo = payload.assignedTo;
+  }
+  if (payload.approvalMode !== undefined) {
+    body.approvalMode = payload.approvalMode;
+  }
+  if (payload.status !== undefined) {
+    body.status = payload.status;
+  }
+  if (payload.activityLog !== undefined) {
+    body.activityLog = payload.activityLog;
+  }
+  if (payload.approvalRequests !== undefined) {
+    body.approvalRequests = payload.approvalRequests;
+  }
+  if (payload.activeTaskId !== undefined) {
+    body.activeTaskId = payload.activeTaskId;
+  }
   if (payload.inputs !== undefined) {
     body.inputs = payload.inputs;
   }
@@ -547,6 +646,9 @@ ipcMain.handle("api-execute-node", async (event, { token, nodeId, payload }) => 
   };
   if (payload.approvalMode) {
     body.approvalMode = payload.approvalMode;
+  }
+  if (payload.refreshToken) {
+    body.refreshToken = payload.refreshToken;
   }
   return apiRequest({ path: `/nodes/${nodeId}/execute`, method: "POST", token, body });
 });

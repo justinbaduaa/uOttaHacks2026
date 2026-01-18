@@ -154,6 +154,11 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self.backend_auth_mode = self.get_config("backend_auth_mode", "service_token")
         self.backend_service_token = self.get_config("backend_service_token", "")
         self.backend_timeout_seconds = int(self.get_config("backend_timeout_seconds", 30))
+        self.cognito_domain = self.get_config("cognito_domain", "").rstrip("/")
+        self.cognito_client_id = self.get_config("cognito_client_id", "")
+        self.cognito_refresh_timeout_seconds = int(
+            self.get_config("cognito_refresh_timeout_seconds", 10)
+        )
         self.approval_mode_default = self.get_config("approval_mode_default", "approve_nodes")
         self.node_budget_max_children = int(self.get_config("node_budget_max_children", 3))
         self.node_budget_max_depth = int(self.get_config("node_budget_max_depth", 3))
@@ -169,6 +174,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self._http_thread: Optional[threading.Thread] = None
         self._approval_poll_task: Optional[asyncio.Task] = None
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
+        self._refresh_token_cache: Dict[str, Dict[str, Any]] = {}
+        self._refresh_token_lock = threading.Lock()
 
         log.info(
             "%s GlassBoxGateway Gateway Component initialization complete.",
@@ -240,8 +247,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             if auth_header:
                 payload["userToken"] = auth_header
 
-        auth_token = self._resolve_backend_token(payload)
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        refresh_token = payload.get("refreshToken")
+        auth_token = self._resolve_backend_token(payload, refresh_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
 
         assigned_to = node.get("assignedTo") or {}
         if assigned_to.get("type") != "agent":
@@ -252,7 +260,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             approval_mode = self.approval_mode_default
 
         resolved_inputs, file_parts = await self._resolve_inputs_with_files(
-            canvas_id, node, auth_token
+            canvas_id, node, auth_token, refresh_token
         )
         task_context = {
             "type": "glassbox_task",
@@ -295,6 +303,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "approval_mode": approval_mode,
             "assigned_agent": assigned_to.get("id"),
             "auth_token": auth_token,
+            "refresh_token": refresh_token,
             "author_sub": node.get("authorSub"),
         }
 
@@ -322,6 +331,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             {
                 "status": "in_progress",
                 "activeTaskId": task_id,
@@ -349,7 +359,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             payload["userToken"] = auth_header
 
         try:
-            auth_token = self._resolve_backend_token(payload)
+            auth_token = self._resolve_backend_token(payload, payload.get("refreshToken"))
         except BackendError as exc:
             self._write_stream_error(handler, str(exc))
             return
@@ -406,13 +416,14 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if not canvas_id or not node_id:
             raise ValueError("canvasId and nodeId are required")
 
-        auth_token = self._resolve_backend_token(external_event_data)
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        refresh_token = external_event_data.get("refreshToken")
+        auth_token = self._resolve_backend_token(external_event_data, refresh_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         assigned_to = node.get("assignedTo") or {}
         target_agent = assigned_to.get("id") or "GlassBoxWorker"
 
         resolved_inputs, file_parts = await self._resolve_inputs_with_files(
-            canvas_id, node, auth_token
+            canvas_id, node, auth_token, refresh_token
         )
         a2a_parts = [
             a2a.create_text_part(text="Execute the Glass Box node task."),
@@ -432,6 +443,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "approval_mode": node.get("approvalMode") or self.approval_mode_default,
             "assigned_agent": assigned_to.get("id"),
             "auth_token": auth_token,
+            "refresh_token": refresh_token,
         }
 
         return target_agent, a2a_parts, external_request_context
@@ -446,8 +458,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id = external_request_context.get("canvas_id")
         node_id = external_request_context.get("node_id")
         auth_token = external_request_context.get("auth_token")
+        refresh_token = external_request_context.get("refresh_token")
 
-        if not canvas_id or not node_id or not auth_token:
+        if not canvas_id or not node_id or (not auth_token and not refresh_token):
             log.warning("%s Missing context to update node completion.", log_id_prefix)
             return
 
@@ -457,12 +470,13 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 message=f"Task {task_id} ended with status {task_status}",
                 data={},
             )
-            node = await self._backend_get_node(canvas_id, node_id, auth_token)
+            node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
             updated_log = self._append_log(node.get("activityLog", []), log_entry)
             await self._update_node(
                 canvas_id,
                 node_id,
                 auth_token,
+                refresh_token,
                 {
                     "status": "failed",
                     "activityLog": updated_log,
@@ -475,7 +489,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             message=f"Task {task_id} completed",
             data={},
         )
-        await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+        await self._append_activity_log(canvas_id, node_id, auth_token, refresh_token, log_entry)
 
     async def _send_error_to_external(
         self, external_request_context: Dict[str, Any], error_data: JSONRPCError
@@ -487,7 +501,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id = external_request_context.get("canvas_id")
         node_id = external_request_context.get("node_id")
         auth_token = external_request_context.get("auth_token")
-        if not canvas_id or not node_id or not auth_token:
+        refresh_token = external_request_context.get("refresh_token")
+        if not canvas_id or not node_id or (not auth_token and not refresh_token):
             return
 
         log_entry = self._build_log_entry(
@@ -495,7 +510,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             message=f"A2A error: {error_message}",
             data={},
         )
-        await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+        await self._append_activity_log(canvas_id, node_id, auth_token, refresh_token, log_entry)
 
     async def _send_update_to_external(
         self,
@@ -528,7 +543,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id = external_request_context.get("canvas_id")
         node_id = external_request_context.get("node_id")
         auth_token = external_request_context.get("auth_token")
-        if not canvas_id or not node_id or not auth_token:
+        refresh_token = external_request_context.get("refresh_token")
+        if not canvas_id or not node_id or (not auth_token and not refresh_token):
             return
 
         message = self._get_status_message(event_data)
@@ -546,7 +562,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                     message=text,
                     data={"finalChunk": is_final_chunk},
                 )
-                await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+                await self._append_activity_log(
+                    canvas_id, node_id, auth_token, refresh_token, log_entry
+                )
             elif isinstance(part, DataPart):
                 data = self._get_data_from_part(part)
                 await self._handle_data_part(
@@ -559,9 +577,10 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id = external_request_context.get("canvas_id")
         node_id = external_request_context.get("node_id")
         auth_token = external_request_context.get("auth_token")
+        refresh_token = external_request_context.get("refresh_token")
         approval_mode = external_request_context.get("approval_mode", self.approval_mode_default)
 
-        if not canvas_id or not node_id or not auth_token:
+        if not canvas_id or not node_id or (not auth_token and not refresh_token):
             return
 
         data_type = data.get("type")
@@ -573,7 +592,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                     message=status_text,
                     data={},
                 )
-                await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+                await self._append_activity_log(
+                    canvas_id, node_id, auth_token, refresh_token, log_entry
+                )
             return
 
         if data_type not in ["glassbox_action", "glassbox_action_request"]:
@@ -591,6 +612,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 canvas_id,
                 node_id,
                 auth_token,
+                refresh_token,
                 action,
                 payload,
                 rationale,
@@ -602,6 +624,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             action,
             payload,
             approval_mode,
@@ -615,7 +638,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id = external_request_context.get("canvas_id")
         node_id = external_request_context.get("node_id")
         auth_token = external_request_context.get("auth_token")
-        if not canvas_id or not node_id or not auth_token:
+        refresh_token = external_request_context.get("refresh_token")
+        if not canvas_id or not node_id or (not auth_token and not refresh_token):
             return
 
         artifact = self._get_artifact_from_update(event_data)
@@ -627,11 +651,16 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             if not isinstance(part, FilePart):
                 continue
             await self._handle_artifact_file(
-                canvas_id, node_id, auth_token, part
+                canvas_id, node_id, auth_token, refresh_token, part
             )
 
     async def _handle_artifact_file(
-        self, canvas_id: str, node_id: str, auth_token: str, part: FilePart
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
+        part: FilePart,
     ) -> None:
         file_content = part.file
         filename = getattr(file_content, "name", "artifact.bin")
@@ -643,13 +672,22 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 message=f"Artifact {filename} had no content bytes",
                 data={},
             )
-            await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+            await self._append_activity_log(
+                canvas_id, node_id, auth_token, refresh_token, log_entry
+            )
             return
 
         slot = self._determine_slot_from_filename(filename)
         if self.artifact_upload_mode == "s3":
             await self._upload_artifact_to_s3(
-                canvas_id, node_id, auth_token, filename, mime_type, file_bytes, slot
+                canvas_id,
+                node_id,
+                auth_token,
+                refresh_token,
+                filename,
+                mime_type,
+                file_bytes,
+                slot,
             )
             return
 
@@ -657,14 +695,14 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             uri = getattr(file_content, "uri", "")
             item = {"type": "link", "url": uri or filename}
             await self._append_item_to_node(
-                canvas_id, node_id, auth_token, slot, item
+                canvas_id, node_id, auth_token, refresh_token, slot, item
             )
             return
 
         encoded = base64.b64encode(file_bytes).decode("ascii")
         item = {"type": "text", "text": f"{filename} (base64): {encoded}"}
         await self._append_item_to_node(
-            canvas_id, node_id, auth_token, slot, item
+            canvas_id, node_id, auth_token, refresh_token, slot, item
         )
 
     async def _execute_action(
@@ -672,28 +710,39 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         canvas_id: str,
         node_id: str,
         auth_token: str,
+        refresh_token: Optional[str],
         action: str,
         payload: Dict[str, Any],
         approval_mode: str,
     ) -> None:
         if action == "propose_subnode":
             await self._create_subnode(
-                canvas_id, node_id, auth_token, payload, approval_mode
+                canvas_id, node_id, auth_token, refresh_token, payload, approval_mode
             )
             return
         if action == "add_output":
             await self._append_item_to_node(
-                canvas_id, node_id, auth_token, "outputs", payload.get("item")
+                canvas_id,
+                node_id,
+                auth_token,
+                refresh_token,
+                "outputs",
+                payload.get("item"),
             )
             return
         if action == "add_evidence":
             await self._append_item_to_node(
-                canvas_id, node_id, auth_token, "evidence", payload.get("item")
+                canvas_id,
+                node_id,
+                auth_token,
+                refresh_token,
+                "evidence",
+                payload.get("item"),
             )
             return
         if action == "complete_node":
             await self._complete_node(
-                canvas_id, node_id, auth_token, payload
+                canvas_id, node_id, auth_token, refresh_token, payload
             )
             return
 
@@ -702,23 +751,28 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             message=f"Ignored unknown action: {action}",
             data={},
         )
-        await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+        await self._append_activity_log(
+            canvas_id, node_id, auth_token, refresh_token, log_entry
+        )
 
     async def _create_subnode(
         self,
         canvas_id: str,
         node_id: str,
         auth_token: str,
+        refresh_token: Optional[str],
         payload: Dict[str, Any],
         approval_mode: str,
     ) -> None:
-        if not await self._within_node_budget(canvas_id, node_id, auth_token):
+        if not await self._within_node_budget(canvas_id, node_id, auth_token, refresh_token):
             log_entry = self._build_log_entry(
                 entry_type="status",
                 message="Subnode creation denied: node budget exceeded",
                 data={},
             )
-            await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+            await self._append_activity_log(
+                canvas_id, node_id, auth_token, refresh_token, log_entry
+            )
             return
 
         title = payload.get("title") or "Agent Proposed Subnode"
@@ -743,13 +797,14 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "status": payload.get("status") or "draft",
         }
 
-        created = await self._backend_create_node(auth_token, body)
+        created = await self._backend_create_node(auth_token, refresh_token, body)
         child_node_id = created.get("nodeId")
         if child_node_id:
             await self._append_item_to_node(
                 canvas_id,
                 node_id,
                 auth_token,
+                refresh_token,
                 "evidence",
                 {
                     "type": "node",
@@ -762,13 +817,20 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             message=f"Created subnode: {title}",
             data={},
         )
-        await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+        await self._append_activity_log(
+            canvas_id, node_id, auth_token, refresh_token, log_entry
+        )
 
     async def _complete_node(
-        self, canvas_id: str, node_id: str, auth_token: str, payload: Dict[str, Any]
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: str,
+        refresh_token: Optional[str],
+        payload: Dict[str, Any],
     ) -> None:
         summary = payload.get("summary")
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         evidence = node.get("evidence", [])
         if summary:
             evidence.append({"type": "text", "text": summary})
@@ -778,13 +840,18 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 canvas_id,
                 node_id,
                 auth_token,
+                refresh_token,
                 {"evidence": evidence},
             )
 
         if node.get("assignedTo", {}).get("type") == "agent":
-            await self._attach_activity_log_evidence(canvas_id, node_id, auth_token)
+            await self._attach_activity_log_evidence(
+                canvas_id, node_id, auth_token, refresh_token
+            )
 
-        node_after = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node_after = await self._backend_get_node(
+            canvas_id, node_id, auth_token, refresh_token
+        )
         evidence = node_after.get("evidence", [])
         if not evidence and node.get("assignedTo", {}).get("type") == "agent":
             log_entry = self._build_log_entry(
@@ -792,13 +859,16 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 message="Completion blocked: evidence required",
                 data={},
             )
-            await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+            await self._append_activity_log(
+                canvas_id, node_id, auth_token, refresh_token, log_entry
+            )
             return
 
         await self._update_node(
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             {
                 "status": "completed",
                 "activeTaskId": None,
@@ -809,19 +879,22 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             message="Node marked completed",
             data={},
         )
-        await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+        await self._append_activity_log(
+            canvas_id, node_id, auth_token, refresh_token, log_entry
+        )
 
     async def _request_approval(
         self,
         canvas_id: str,
         node_id: str,
         auth_token: str,
+        refresh_token: Optional[str],
         action: str,
         payload: Dict[str, Any],
         rationale: Optional[str],
         external_request_context: Dict[str, Any],
     ) -> None:
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         approval_id = str(uuid.uuid4())
         approval_request = {
             "approvalId": approval_id,
@@ -850,6 +923,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             {
                 "approvalRequests": approval_requests,
                 "activityLog": self._append_log(node.get("activityLog", []), log_entry),
@@ -860,6 +934,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "canvas_id": canvas_id,
             "node_id": node_id,
             "auth_token": auth_token,
+            "refresh_token": refresh_token,
             "action": action,
             "payload": payload,
             "approval_mode": external_request_context.get("approval_mode"),
@@ -878,11 +953,14 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 canvas_id = context.get("canvas_id")
                 node_id = context.get("node_id")
                 auth_token = context.get("auth_token")
-                if not canvas_id or not node_id or not auth_token:
+                refresh_token = context.get("refresh_token")
+                if not canvas_id or not node_id or (not auth_token and not refresh_token):
                     self._pending_approvals.pop(approval_id, None)
                     continue
 
-                node = await self._backend_get_node(canvas_id, node_id, auth_token)
+                node = await self._backend_get_node(
+                    canvas_id, node_id, auth_token, refresh_token
+                )
                 approval_requests = node.get("approvalRequests", [])
                 matching = None
                 for request_item in approval_requests:
@@ -901,6 +979,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                             canvas_id,
                             node_id,
                             auth_token,
+                            refresh_token,
                             context.get("action"),
                             context.get("payload", {}),
                             context.get("approval_mode") or self.approval_mode_default,
@@ -911,6 +990,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                             canvas_id,
                             node_id,
                             auth_token,
+                            refresh_token,
                             {"approvalRequests": approval_requests},
                         )
                         self._pending_approvals.pop(approval_id, None)
@@ -926,52 +1006,78 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                         message=f"Approval rejected: {approval_id}",
                         data={},
                     )
-                    await self._append_activity_log(canvas_id, node_id, auth_token, log_entry)
+                    await self._append_activity_log(
+                        canvas_id, node_id, auth_token, refresh_token, log_entry
+                    )
                     self._pending_approvals.pop(approval_id, None)
 
             await asyncio.sleep(self.approval_poll_interval_seconds)
 
     async def _backend_get_node(
-        self, canvas_id: str, node_id: str, auth_token: str
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         data = await self._backend_request(
             "GET",
             f"/nodes/{node_id}",
             auth_token,
             query={"canvasId": canvas_id},
+            refresh_token=refresh_token,
         )
         if not isinstance(data, dict):
             raise BackendError("Invalid node response")
         return data
 
     async def _backend_list_children(
-        self, canvas_id: str, parent_node_id: str, auth_token: str
+        self,
+        canvas_id: str,
+        parent_node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         data = await self._backend_request(
             "GET",
             "/nodes",
             auth_token,
             query={"canvasId": canvas_id, "parentNodeId": parent_node_id},
+            refresh_token=refresh_token,
         )
         if isinstance(data, list):
             return data
         return []
 
     async def _backend_create_node(
-        self, auth_token: str, body: Dict[str, Any]
+        self,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
+        body: Dict[str, Any],
     ) -> Dict[str, Any]:
-        data = await self._backend_request("POST", "/nodes", auth_token, body=body)
+        data = await self._backend_request(
+            "POST", "/nodes", auth_token, body=body, refresh_token=refresh_token
+        )
         if not isinstance(data, dict):
             raise BackendError("Invalid create node response")
         return data
 
     async def _update_node(
-        self, canvas_id: str, node_id: str, auth_token: str, patch: Dict[str, Any]
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
+        patch: Dict[str, Any],
     ) -> Dict[str, Any]:
         body = {"canvasId": canvas_id}
         body.update(patch)
         data = await self._backend_request(
-            "PATCH", f"/nodes/{node_id}", auth_token, body=body
+            "PATCH",
+            f"/nodes/{node_id}",
+            auth_token,
+            body=body,
+            refresh_token=refresh_token,
         )
         if not isinstance(data, dict):
             raise BackendError("Invalid update node response")
@@ -981,7 +1087,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         slot: str,
         filename: str,
         content_type: str,
@@ -993,7 +1100,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "filename": filename,
             "contentType": content_type,
         }
-        data = await self._backend_request("POST", "/files/presign", auth_token, body=body)
+        data = await self._backend_request(
+            "POST", "/files/presign", auth_token, body=body, refresh_token=refresh_token
+        )
         if not isinstance(data, dict):
             raise BackendError("Invalid presign response")
         return data
@@ -1002,7 +1111,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         file_item: Dict[str, Any],
     ) -> Dict[str, Any]:
         body = {
@@ -1014,7 +1124,11 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if file_item.get("s3Key"):
             body["s3Key"] = file_item.get("s3Key")
         data = await self._backend_request(
-            "POST", "/files/presign-download", auth_token, body=body
+            "POST",
+            "/files/presign-download",
+            auth_token,
+            body=body,
+            refresh_token=refresh_token,
         )
         if not isinstance(data, dict):
             raise BackendError("Invalid presign download response")
@@ -1024,7 +1138,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         slot: str,
         file_item: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -1037,7 +1152,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "filename": file_item.get("filename"),
             "contentType": file_item.get("contentType"),
         }
-        data = await self._backend_request("POST", "/files/complete", auth_token, body=body)
+        data = await self._backend_request(
+            "POST", "/files/complete", auth_token, body=body, refresh_token=refresh_token
+        )
         if not isinstance(data, dict):
             raise BackendError("Invalid complete file response")
         return data
@@ -1046,22 +1163,25 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         method: str,
         path: str,
-        auth_token: str,
+        auth_token: Optional[str],
         query: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
+        refresh_token: Optional[str] = None,
     ) -> Any:
         return await asyncio.to_thread(
-            self._backend_request_sync, method, path, auth_token, query, body
+            self._backend_request_sync, method, path, auth_token, query, body, refresh_token
         )
 
     def _backend_request_sync(
         self,
         method: str,
         path: str,
-        auth_token: str,
+        auth_token: Optional[str],
         query: Optional[Dict[str, str]],
         body: Optional[Dict[str, Any]],
+        refresh_token: Optional[str],
     ) -> Any:
+        auth_token = self._prepare_auth_token(auth_token, refresh_token)
         if not auth_token:
             raise BackendError("Missing backend auth token")
 
@@ -1078,17 +1198,17 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        status, raw_body = self._perform_backend_request(
+            method, url, headers, data
+        )
 
-        req = url_request.Request(url, method=method, headers=headers, data=data)
-        try:
-            with url_request.urlopen(req, timeout=self.backend_timeout_seconds) as response:
-                raw_body = response.read().decode("utf-8")
-                status = response.status
-        except url_error.HTTPError as exc:
-            raw_body = exc.read().decode("utf-8")
-            status = exc.code
-        except url_error.URLError as exc:
-            raise BackendError(f"Backend request failed: {exc}") from exc
+        if status in [401, 403] and refresh_token and self.backend_auth_mode == "user_token":
+            refreshed = self._refresh_user_token(refresh_token)
+            if refreshed:
+                headers["Authorization"] = self._normalize_bearer(refreshed)
+                status, raw_body = self._perform_backend_request(
+                    method, url, headers, data
+                )
 
         parsed = None
         if raw_body:
@@ -1108,14 +1228,21 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         filename: str,
         content_type: str,
         file_bytes: bytes,
         slot: str,
     ) -> None:
         presign = await self._backend_presign_file(
-            canvas_id, node_id, auth_token, slot, filename, content_type
+            canvas_id,
+            node_id,
+            auth_token,
+            refresh_token,
+            slot,
+            filename,
+            content_type,
         )
         upload_url = presign.get("uploadUrl")
         if not upload_url:
@@ -1132,13 +1259,17 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "contentType": content_type,
         }
         await self._backend_complete_file(
-            canvas_id, node_id, auth_token, slot, file_item
+            canvas_id, node_id, auth_token, refresh_token, slot, file_item
         )
 
     async def _attach_activity_log_evidence(
-        self, canvas_id: str, node_id: str, auth_token: str
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
     ) -> None:
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         filename = f"evidence__activity_log_{node_id}.json"
         for item in node.get("evidence", []):
             if item.get("type") == "file" and item.get("filename") == filename:
@@ -1154,7 +1285,13 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         content_type = "application/json"
 
         presign = await self._backend_presign_file(
-            canvas_id, node_id, auth_token, "evidence", filename, content_type
+            canvas_id,
+            node_id,
+            auth_token,
+            refresh_token,
+            "evidence",
+            filename,
+            content_type,
         )
         upload_url = presign.get("uploadUrl")
         if not upload_url:
@@ -1171,7 +1308,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             "contentType": content_type,
         }
         await self._backend_complete_file(
-            canvas_id, node_id, auth_token, "evidence", file_item
+            canvas_id, node_id, auth_token, refresh_token, "evidence", file_item
         )
 
     def _upload_bytes_to_url(self, upload_url: str, file_bytes: bytes, content_type: str) -> None:
@@ -1188,19 +1325,21 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         slot: str,
         item: Any,
     ) -> None:
         if not isinstance(item, dict):
             return
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         current_items = node.get(slot, [])
         current_items.append(item)
         await self._update_node(
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             {slot: current_items},
         )
 
@@ -1208,21 +1347,27 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         entry: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        node = await self._backend_get_node(canvas_id, node_id, auth_token)
+        node = await self._backend_get_node(canvas_id, node_id, auth_token, refresh_token)
         updated_log = self._append_log(node.get("activityLog", []), entry)
         await self._update_node(
             canvas_id,
             node_id,
             auth_token,
+            refresh_token,
             {"activityLog": updated_log},
         )
         return updated_log
 
     async def _resolve_inputs(
-        self, canvas_id: str, node: Dict[str, Any], auth_token: str
+        self,
+        canvas_id: str,
+        node: Dict[str, Any],
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         resolved = []
         for item in node.get("inputs", []):
@@ -1233,7 +1378,9 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             if not node_id:
                 continue
             include = item.get("include") or "outputs"
-            referenced = await self._backend_get_node(canvas_id, node_id, auth_token)
+            referenced = await self._backend_get_node(
+                canvas_id, node_id, auth_token, refresh_token
+            )
             if include in ["outputs", "all"]:
                 resolved.extend(referenced.get("outputs", []))
             if include in ["evidence", "all"]:
@@ -1241,11 +1388,17 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         return resolved
 
     async def _resolve_inputs_with_files(
-        self, canvas_id: str, node: Dict[str, Any], auth_token: str
+        self,
+        canvas_id: str,
+        node: Dict[str, Any],
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[ContentPart]]:
-        resolved_inputs = await self._resolve_inputs(canvas_id, node, auth_token)
+        resolved_inputs = await self._resolve_inputs(
+            canvas_id, node, auth_token, refresh_token
+        )
         file_parts = await self._build_file_parts(
-            canvas_id, node.get("nodeId", ""), auth_token, resolved_inputs
+            canvas_id, node.get("nodeId", ""), auth_token, refresh_token, resolved_inputs
         )
         return resolved_inputs, file_parts
 
@@ -1253,7 +1406,8 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         inputs: List[Dict[str, Any]],
     ) -> List[ContentPart]:
         file_parts: List[ContentPart] = []
@@ -1266,7 +1420,7 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
                 continue
             seen_keys.add(dedupe_key)
             file_part = await self._file_item_to_part(
-                canvas_id, node_id, auth_token, item
+                canvas_id, node_id, auth_token, refresh_token, item
             )
             if file_part is not None:
                 file_parts.append(file_part)
@@ -1276,12 +1430,13 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         self,
         canvas_id: str,
         node_id: str,
-        auth_token: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str],
         item: Dict[str, Any],
     ) -> Optional[ContentPart]:
         try:
             presign = await self._backend_presign_download(
-                canvas_id, node_id, auth_token, item
+                canvas_id, node_id, auth_token, refresh_token, item
             )
         except BackendError as exc:
             log.warning("Presign download failed for %s: %s", item.get("filename"), exc)
@@ -1306,28 +1461,45 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         return a2a.create_data_part(data={"type": "file_fallback", "file": file_content})
 
     async def _within_node_budget(
-        self, canvas_id: str, node_id: str, auth_token: str
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
     ) -> bool:
-        children = await self._backend_list_children(canvas_id, node_id, auth_token)
+        children = await self._backend_list_children(
+            canvas_id, node_id, auth_token, refresh_token
+        )
         if len(children) >= self.node_budget_max_children:
             return False
 
         depth = 0
-        current = await self._backend_get_node(canvas_id, node_id, auth_token)
+        current = await self._backend_get_node(
+            canvas_id, node_id, auth_token, refresh_token
+        )
         parent_id = current.get("parentNodeId")
         while parent_id and parent_id != "ROOT":
             depth += 1
             if depth >= self.node_budget_max_depth:
                 return False
-            current = await self._backend_get_node(canvas_id, parent_id, auth_token)
+            current = await self._backend_get_node(
+                canvas_id, parent_id, auth_token, refresh_token
+            )
             parent_id = current.get("parentNodeId")
         return True
 
-    def _resolve_backend_token(self, payload: Dict[str, Any]) -> str:
+    def _resolve_backend_token(
+        self, payload: Dict[str, Any], refresh_token: Optional[str] = None
+    ) -> str:
         if self.backend_auth_mode == "user_token":
             token = payload.get("userToken") or ""
             if token:
                 return self._normalize_bearer(token)
+            cached = self._get_cached_token(refresh_token)
+            if cached:
+                return self._normalize_bearer(cached)
+            if refresh_token:
+                return ""
             raise BackendError("Missing userToken for backend requests")
 
         token = self.backend_service_token or ""
@@ -1340,6 +1512,149 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
         if stripped.startswith("Bearer "):
             return stripped
         return "Bearer " + stripped
+
+    def _prepare_auth_token(
+        self, auth_token: Optional[str], refresh_token: Optional[str]
+    ) -> str:
+        token = auth_token.strip() if auth_token else ""
+        if token:
+            return self._normalize_bearer(token)
+        if self.backend_auth_mode != "user_token":
+            return ""
+        cached = self._get_cached_token(refresh_token)
+        if cached:
+            return self._normalize_bearer(cached)
+        if refresh_token:
+            refreshed = self._refresh_user_token(refresh_token)
+            if refreshed:
+                return self._normalize_bearer(refreshed)
+        return ""
+
+    def _perform_backend_request(
+        self,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        data: Optional[bytes],
+    ) -> Tuple[int, str]:
+        req = url_request.Request(url, method=method, headers=headers, data=data)
+        try:
+            with url_request.urlopen(req, timeout=self.backend_timeout_seconds) as response:
+                raw_body = response.read().decode("utf-8")
+                status = response.status
+        except url_error.HTTPError as exc:
+            raw_body = exc.read().decode("utf-8")
+            status = exc.code
+        except url_error.URLError as exc:
+            raise BackendError(f"Backend request failed: {exc}") from exc
+        return status, raw_body
+
+    def _decode_jwt_payload(self, token: str) -> Optional[Dict[str, Any]]:
+        try:
+            parts = token.split(".")
+            if len(parts) < 2:
+                return None
+            payload = parts[1]
+            padding = "=" * (-len(payload) % 4)
+            decoded = base64.urlsafe_b64decode((payload + padding).encode("ascii"))
+            return json.loads(decoded.decode("utf-8"))
+        except Exception:
+            return None
+
+    def _compute_token_expiry(
+        self, token: str, expires_in: Optional[int]
+    ) -> Optional[float]:
+        payload = self._decode_jwt_payload(token)
+        if payload and isinstance(payload.get("exp"), (int, float)):
+            return float(payload.get("exp"))
+        if isinstance(expires_in, str):
+            try:
+                expires_in = int(expires_in)
+            except ValueError:
+                expires_in = None
+        if isinstance(expires_in, int):
+            return time.time() + float(expires_in)
+        return None
+
+    def _get_cached_token(self, refresh_token: Optional[str]) -> Optional[str]:
+        if not refresh_token:
+            return None
+        with self._refresh_token_lock:
+            entry = self._refresh_token_cache.get(refresh_token)
+            if not entry:
+                return None
+            expires_at = entry.get("expires_at")
+            if expires_at and time.time() >= expires_at:
+                self._refresh_token_cache.pop(refresh_token, None)
+                return None
+            return entry.get("token")
+
+    def _store_cached_token(
+        self, refresh_token: str, token: str, expires_at: Optional[float]
+    ) -> None:
+        if not refresh_token or not token:
+            return
+        if expires_at:
+            expires_at = max(expires_at - 30, 0)
+        with self._refresh_token_lock:
+            self._refresh_token_cache[refresh_token] = {
+                "token": token,
+                "expires_at": expires_at,
+            }
+
+    def _refresh_user_token(self, refresh_token: str) -> str:
+        if not refresh_token:
+            return ""
+        cached = self._get_cached_token(refresh_token)
+        if cached:
+            return cached
+        if not self.cognito_domain or not self.cognito_client_id:
+            raise BackendError("Cognito refresh not configured")
+
+        body = url_parse.urlencode(
+            {
+                "grant_type": "refresh_token",
+                "client_id": self.cognito_client_id,
+                "refresh_token": refresh_token,
+            }
+        ).encode("utf-8")
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        req = url_request.Request(
+            f"{self.cognito_domain}/oauth2/token",
+            method="POST",
+            headers=headers,
+            data=body,
+        )
+        try:
+            with url_request.urlopen(req, timeout=self.cognito_refresh_timeout_seconds) as response:
+                raw_body = response.read().decode("utf-8")
+                status = response.status
+        except url_error.HTTPError as exc:
+            raw_body = exc.read().decode("utf-8")
+            status = exc.code
+        except url_error.URLError as exc:
+            raise BackendError(f"Token refresh failed: {exc}") from exc
+
+        parsed = None
+        if raw_body:
+            try:
+                parsed = json.loads(raw_body)
+            except ValueError:
+                parsed = raw_body
+
+        if status >= 400:
+            raise BackendError("Token refresh failed", status=status, details=parsed)
+
+        if not isinstance(parsed, dict):
+            raise BackendError("Token refresh failed: invalid response")
+
+        token = parsed.get("id_token") or parsed.get("idToken")
+        if not token:
+            raise BackendError("Token refresh failed: missing id_token")
+
+        expires_at = self._compute_token_expiry(token, parsed.get("expires_in"))
+        self._store_cached_token(refresh_token, token, expires_at)
+        return token
 
     def _requires_approval(self, action: str, approval_mode: str) -> bool:
         if approval_mode == "approve_all":
@@ -1377,12 +1692,18 @@ class GlassBoxGatewayGatewayComponent(BaseGatewayComponent):
             return base64.b64decode(raw_bytes)
         return b""
 
-    def _get_node_for_stream(self, canvas_id: str, node_id: str, auth_token: str) -> Dict[str, Any]:
+    def _get_node_for_stream(
+        self,
+        canvas_id: str,
+        node_id: str,
+        auth_token: Optional[str],
+        refresh_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
         async_loop = self._resolve_async_loop()
         if not async_loop or not async_loop.is_running():
             raise BackendError("Async loop not running")
         future = asyncio.run_coroutine_threadsafe(
-            self._backend_get_node(canvas_id, node_id, auth_token),
+            self._backend_get_node(canvas_id, node_id, auth_token, refresh_token),
             async_loop,
         )
         return future.result(timeout=self.backend_timeout_seconds)

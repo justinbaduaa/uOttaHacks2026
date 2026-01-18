@@ -5,6 +5,9 @@
 
 const Auth = {
   token: null,
+  refreshToken: null,
+  tokenExpiresAt: null,
+  refreshTimer: null,
 
   getStoredToken() {
     return localStorage.getItem('glassbox.authToken');
@@ -12,12 +15,140 @@ const Auth = {
   setStoredToken(token) {
     localStorage.setItem('glassbox.authToken', token);
   },
+  getStoredRefreshToken() {
+    return localStorage.getItem('glassbox.refreshToken');
+  },
+  setStoredRefreshToken(refreshToken) {
+    if (refreshToken) {
+      localStorage.setItem('glassbox.refreshToken', refreshToken);
+    }
+  },
+  getStoredTokenExpiry() {
+    const raw = localStorage.getItem('glassbox.tokenExpiresAt');
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  },
+  setStoredTokenExpiry(expiresAt) {
+    if (expiresAt) {
+      localStorage.setItem('glassbox.tokenExpiresAt', String(expiresAt));
+    }
+  },
+  clearStoredAuth() {
+    localStorage.removeItem('glassbox.authToken');
+    localStorage.removeItem('glassbox.refreshToken');
+    localStorage.removeItem('glassbox.tokenExpiresAt');
+  },
+  getRefreshToken() {
+    return this.refreshToken || this.getStoredRefreshToken();
+  },
+  normalizeAuthResponse(response) {
+    if (!response) return null;
+    if (typeof response === 'string') {
+      return { idToken: response };
+    }
+    if (typeof response === 'object') {
+      return {
+        idToken: response.idToken || response.id_token || response.token || '',
+        refreshToken: response.refreshToken || response.refresh_token || '',
+        expiresIn: response.expiresIn || response.expires_in || null,
+      };
+    }
+    return null;
+  },
+  deriveExpiresAt(token, expiresIn) {
+    const payload = token ? parseJwt(token) : null;
+    if (payload && typeof payload.exp === 'number') {
+      return payload.exp * 1000;
+    }
+    const numericExpiresIn = typeof expiresIn === 'string' ? Number(expiresIn) : expiresIn;
+    if (typeof numericExpiresIn === 'number' && Number.isFinite(numericExpiresIn)) {
+      return Date.now() + numericExpiresIn * 1000;
+    }
+    return null;
+  },
+  isTokenFresh(expiresAt) {
+    if (!expiresAt) {
+      return true;
+    }
+    const now = Date.now();
+    return now < expiresAt - 60 * 1000;
+  },
+  scheduleRefresh() {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    if (!this.refreshToken || !this.tokenExpiresAt) {
+      return;
+    }
+    const now = Date.now();
+    const refreshAt = this.tokenExpiresAt - 5 * 60 * 1000;
+    const delay = Math.max(refreshAt - now, 30 * 1000);
+    if (delay <= 0) {
+      this.refreshAuth().catch(() => {});
+      return;
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshAuth().catch(() => {});
+    }, delay);
+  },
+  async refreshAuth() {
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) {
+      return false;
+    }
+    if (!window.glassBox || !window.glassBox.refreshAuth) {
+      console.warn('Refresh bridge not available. Cannot refresh token.');
+      return false;
+    }
+    try {
+      const response = await window.glassBox.refreshAuth(refreshToken);
+      const normalized = this.normalizeAuthResponse(response);
+      if (!normalized?.idToken) {
+        throw new Error('Missing idToken in refresh response');
+      }
+      const expiresAt = this.deriveExpiresAt(normalized.idToken, normalized.expiresIn);
+      const nextRefreshToken = normalized.refreshToken || refreshToken;
+      this.setStoredToken(normalized.idToken);
+      this.setStoredRefreshToken(nextRefreshToken);
+      if (expiresAt) {
+        this.setStoredTokenExpiry(expiresAt);
+      }
+      this.token = normalized.idToken;
+      this.refreshToken = nextRefreshToken;
+      this.tokenExpiresAt = expiresAt;
+      this.scheduleRefresh();
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      return false;
+    }
+  },
 
   async ensureAuth() {
     const existing = this.getStoredToken();
-    if (existing) {
+    const refreshToken = this.getStoredRefreshToken();
+    const storedExpiresAt = this.getStoredTokenExpiry();
+    const inferredExpiresAt = existing
+      ? storedExpiresAt || this.deriveExpiresAt(existing, null)
+      : null;
+    if (existing && this.isTokenFresh(inferredExpiresAt)) {
       this.token = existing;
+      this.refreshToken = refreshToken;
+      this.tokenExpiresAt = inferredExpiresAt;
+      if (inferredExpiresAt && !storedExpiresAt) {
+        this.setStoredTokenExpiry(inferredExpiresAt);
+      }
+      this.scheduleRefresh();
       return;
+    }
+
+    if (refreshToken) {
+      const refreshed = await this.refreshAuth();
+      if (refreshed) {
+        return;
+      }
     }
 
     if (!window.glassBox || !window.glassBox.startAuth) {
@@ -26,10 +157,21 @@ const Auth = {
     }
 
     try {
-      const token = await window.glassBox.startAuth();
-      if (token) {
-        this.setStoredToken(token);
-        this.token = token;
+      const response = await window.glassBox.startAuth();
+      const normalized = this.normalizeAuthResponse(response);
+      if (normalized?.idToken) {
+        const expiresAtNext = this.deriveExpiresAt(normalized.idToken, normalized.expiresIn);
+        this.setStoredToken(normalized.idToken);
+        if (normalized.refreshToken) {
+          this.setStoredRefreshToken(normalized.refreshToken);
+        }
+        if (expiresAtNext) {
+          this.setStoredTokenExpiry(expiresAtNext);
+        }
+        this.token = normalized.idToken;
+        this.refreshToken = normalized.refreshToken || refreshToken;
+        this.tokenExpiresAt = expiresAtNext;
+        this.scheduleRefresh();
       }
     } catch (error) {
       console.error('Authentication failed:', error);
@@ -154,7 +296,12 @@ const Api = {
   executeNode(nodeId, payload) {
     const token = this.getAuthToken();
     if (window.glassBox?.api?.executeNode) {
-      return window.glassBox.api.executeNode(token, nodeId, payload);
+      const refreshToken = Auth.getRefreshToken();
+      const body = { ...(payload || {}) };
+      if (refreshToken) {
+        body.refreshToken = refreshToken;
+      }
+      return window.glassBox.api.executeNode(token, nodeId, body);
     }
     return Promise.reject(new Error('API bridge unavailable'));
   },

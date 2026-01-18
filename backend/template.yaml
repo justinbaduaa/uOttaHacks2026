@@ -63,7 +63,6 @@ Resources:
         - openid
         - email
         - profile
-        - offline_access
       SupportedIdentityProviders:
         - COGNITO
       CallbackURLs:

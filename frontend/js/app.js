@@ -517,7 +517,11 @@ const App = {
     }
 
     try {
-      const token = await window.glassBox.startAuth();
+      const response = await window.glassBox.startAuth();
+      const token =
+        typeof response === 'string'
+          ? response
+          : response?.idToken || response?.id_token || response?.token || '';
       if (token) {
         this.setStoredToken(token);
         this.authToken = token;

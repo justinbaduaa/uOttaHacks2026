@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('glassBox', {
   startAuth: () => ipcRenderer.invoke('start-auth'),
+  refreshAuth: (refreshToken) => ipcRenderer.invoke('refresh-auth', refreshToken),
   api: {
     listCanvases: (token) => ipcRenderer.invoke('api-list-canvases', token),
     getCanvasEvidence: (token, canvasId) => ipcRenderer.invoke('api-get-canvas-evidence', { token, canvasId }),

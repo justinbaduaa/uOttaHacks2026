@@ -78,6 +78,27 @@ class GlassBoxGatewayGatewayApp(BaseGatewayApp):
             "description": "Timeout in seconds for backend requests.",
         },
         {
+            "name": "cognito_domain",
+            "required": False,
+            "type": "string",
+            "default": "",
+            "description": "Cognito domain used to refresh user tokens (Hosted UI domain).",
+        },
+        {
+            "name": "cognito_client_id",
+            "required": False,
+            "type": "string",
+            "default": "",
+            "description": "Cognito app client ID used for refresh token flow.",
+        },
+        {
+            "name": "cognito_refresh_timeout_seconds",
+            "required": False,
+            "type": "integer",
+            "default": 10,
+            "description": "Timeout in seconds for Cognito refresh token requests.",
+        },
+        {
             "name": "approval_mode_default",
             "required": False,
             "type": "string",

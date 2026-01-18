@@ -46,6 +46,9 @@ apps:
       backend_auth_mode: "${GLASSBOX_BACKEND_AUTH_MODE, service_token}"
       backend_service_token: "${GLASSBOX_SERVICE_TOKEN}"
       backend_timeout_seconds: ${GLASSBOX_BACKEND_TIMEOUT_SECONDS, 30}
+      cognito_domain: "${GLASSBOX_COGNITO_DOMAIN, \"\"}"
+      cognito_client_id: "${GLASSBOX_COGNITO_CLIENT_ID, \"\"}"
+      cognito_refresh_timeout_seconds: ${GLASSBOX_COGNITO_REFRESH_TIMEOUT_SECONDS, 10}
 
       approval_mode_default: "${GLASSBOX_APPROVAL_MODE, approve_nodes}"
       node_budget_max_children: ${GLASSBOX_NODE_BUDGET_MAX_CHILDREN, 3}
