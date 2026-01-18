@@ -1,5 +1,4 @@
 /* Glass Box - Light Theme Design System */
-/* Pure CSS - No build step required */
 
 /* ========================================
    CSS Reset & Variables
@@ -13,49 +12,53 @@
 
 :root {
   /* Background Colors */
-  --bg-primary: #F5F7FA;
-  --bg-secondary: #FFFFFF;
-  --bg-canvas: #F8FAFC;
-  
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-canvas: #f8fafc;
+
   /* Sidebar Colors */
-  --sidebar-bg: #FFFFFF;
-  --sidebar-hover: #F3F4F6;
-  --sidebar-active: #E8F5F1;
-  --sidebar-active-text: #22A47F;
-  
+  --sidebar-bg: #ffffff;
+  --sidebar-hover: #f3f4f6;
+  --sidebar-active: #e8f5f1;
+  --sidebar-active-text: #22a47f;
+
   /* Border Colors */
-  --border-subtle: #E5E7EB;
-  --border-default: #D1D5DB;
-  --border-strong: #9CA3AF;
-  
+  --border-subtle: #e5e7eb;
+  --border-default: #d1d5db;
+  --border-strong: #9ca3af;
+
   /* Text Colors */
-  --text-primary: #1A1A2E;
-  --text-secondary: #6B7280;
-  --text-tertiary: #9CA3AF;
-  --text-muted: #D1D5DB;
-  
+  --text-primary: #1a1a2e;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --text-muted: #d1d5db;
+
   /* Accent Colors */
-  --accent: #22A47F;
-  --accent-light: #E8F5F1;
-  --accent-hover: #1D8F6E;
-  
+  --accent: #22a47f;
+  --accent-light: #e8f5f1;
+  --accent-hover: #1d8f6e;
+
   /* Status Colors */
-  --status-done: #22A47F;
-  --status-done-bg: #E8F5F1;
-  --status-progress: #F59E0B;
-  --status-progress-bg: #FEF3C7;
-  --status-planning: #6B7280;
-  --status-planning-bg: #F3F4F6;
-  
+  --status-done: #22a47f;
+  --status-done-bg: #e8f5f1;
+  --status-progress: #f59e0b;
+  --status-progress-bg: #fef3c7;
+  --status-planning: #6b7280;
+  --status-planning-bg: #f3f4f6;
+
   /* Typography */
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  
+  --font-sans:
+    "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+
   /* Font Sizes */
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;
   --text-lg: 1.125rem;
-  
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+
   /* Spacing */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -64,20 +67,22 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
-  
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 9999px;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.05);
-  
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-base: 200ms ease;
@@ -87,7 +92,9 @@
    Base Styles
    ======================================== */
 
-html, body {
+html,
+body,
+#root {
   width: 100%;
   height: 100%;
   font-family: var(--font-sans);
@@ -97,10 +104,13 @@ html, body {
   color: var(--text-primary);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  user-select: none;
 }
 
-#app {
+/* ========================================
+   App Layout
+   ======================================== */
+
+.app {
   display: flex;
   width: 100%;
   height: 100%;
@@ -122,8 +132,31 @@ html, body {
 
 .sidebar-header {
   padding: var(--space-4);
-  padding-top: 48px; /* Space for macOS native traffic lights */
   -webkit-app-region: drag;
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--space-4);
+}
+
+.control {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.control-close {
+  background: #ff5f57;
+}
+
+.control-minimize {
+  background: #febc2e;
+}
+
+.control-maximize {
+  background: #28c840;
 }
 
 .logo {
@@ -164,7 +197,7 @@ html, body {
 .project-avatar {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -217,6 +250,10 @@ html, body {
   font-weight: 500;
   transition: all var(--transition-fast);
   cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
 }
 
 .nav-item:hover {
@@ -231,6 +268,10 @@ html, body {
 
 .nav-item.active svg {
   color: var(--sidebar-active-text);
+}
+
+.nav-item svg {
+  flex-shrink: 0;
 }
 
 /* Sidebar Section */
@@ -365,42 +406,34 @@ html, body {
    Canvas
    ======================================== */
 
-.canvas-container {
+.canvas-wrapper {
   flex: 1;
   position: relative;
   overflow: hidden;
-  cursor: grab;
-  background: 
-    radial-gradient(circle at 50% 0%, rgba(34, 164, 127, 0.03) 0%, transparent 50%),
-    var(--bg-canvas);
 }
 
-.canvas-container:active {
+.canvas-wrapper .react-flow {
+  background: var(--bg-canvas);
+}
+
+.canvas-wrapper .react-flow__node {
+  cursor: grab;
+}
+
+.canvas-wrapper .react-flow__node:active {
   cursor: grabbing;
 }
 
-/* Dot pattern */
-.canvas-container::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle, var(--border-subtle) 1px, transparent 1px);
-  background-size: 24px 24px;
-  pointer-events: none;
-}
-
-.canvas {
-  position: absolute;
-  transform-origin: 0 0;
-  will-change: transform;
+/* React Flow background dots */
+.react-flow__background {
+  background-color: var(--bg-canvas);
 }
 
 /* ========================================
    Glass Box Node
    ======================================== */
 
-.glass-node {
-  position: absolute;
+.glass-box-node {
   width: 320px;
   background: var(--bg-secondary);
   border-radius: var(--radius-xl);
@@ -408,26 +441,18 @@ html, body {
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border-subtle);
   cursor: grab;
-  transition: box-shadow var(--transition-base), border-color var(--transition-base);
-  user-select: none;
+  transition: all var(--transition-base);
 }
 
-.glass-node:hover {
-  box-shadow: var(--shadow-lg);
-  border-color: var(--border-default);
-}
-
-.glass-node.dragging {
+.glass-box-node:active {
   cursor: grabbing;
-  box-shadow: var(--shadow-lg);
-  border-color: var(--accent);
-  z-index: 1000;
 }
 
-.glass-node.focused {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(34, 164, 127, 0.2), var(--shadow-lg);
+.glass-box-node:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
 }
+
 
 .node-content {
   display: flex;
@@ -452,6 +477,7 @@ html, body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 
 .node-footer {
   display: flex;
@@ -491,7 +517,7 @@ html, body {
 .node-avatar {
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, #A5B4FC, #818CF8);
+  background: linear-gradient(135deg, #a5b4fc, #818cf8);
   border-radius: var(--radius-full);
   display: flex;
   align-items: center;
@@ -567,6 +593,10 @@ button {
   font-family: inherit;
   cursor: pointer;
 }
+
+/* ========================================
+   Focus States
+   ======================================== */
 
 :focus {
   outline: none;

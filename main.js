@@ -16,13 +16,14 @@ function createWindow() {
     },
     // Modern window appearance
     titleBarStyle: "hiddenInset",
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#F5F7FA",
   });
 
+  // Load directly from frontend folder
   mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
 
   // Open DevTools in development
-  if (process.env.NODE_ENV === "development") {
+  if (process.argv.includes("--dev")) {
     mainWindow.webContents.openDevTools();
   }
 
