@@ -766,6 +766,7 @@ const Canvas = {
     this.setActiveUsers([]);
     this.renderSidebar();
     this.updateBreadcrumb();
+    this.updateCodePanel(); // Critical update
     await this.loadNodesForCanvas(canvasId);
     if (this.state.selectedCanvasId === canvasId) {
       this.startPolling();
@@ -876,6 +877,7 @@ const Canvas = {
   },
 
   toggleCodePanel() {
+    console.log('[Canvas] toggleCodePanel called', this.state.isShowingCode);
     if (!this.canvasCodePanel) return;
     if (this.state.isShowingCode) {
       this.closeCodePanel();
@@ -885,6 +887,7 @@ const Canvas = {
   },
 
   openCodePanel() {
+    console.log('[Canvas] openCodePanel');
     if (!this.canvasCodePanel) return;
     this.updateCodePanel();
     this.canvasCodePanel.hidden = false;
@@ -892,14 +895,17 @@ const Canvas = {
   },
 
   closeCodePanel() {
+    console.log('[Canvas] closeCodePanel');
     if (!this.canvasCodePanel) return;
     this.canvasCodePanel.hidden = true;
     this.state.isShowingCode = false;
   },
 
   updateCodePanel() {
+    console.log('[Canvas] updateCodePanel', this.state.selectedCanvasId);
     if (!this.canvasCodeToggle || !this.canvasCodeValue || !this.canvasCodeHint) return;
     const selectedCanvas = this.state.canvases.find(c => c.id === this.state.selectedCanvasId);
+    console.log('[Canvas] selectedCanvas for code:', selectedCanvas);
 
     if (!selectedCanvas) {
       this.canvasCodeToggle.disabled = true;
@@ -970,8 +976,12 @@ const Canvas = {
         id: created.canvasId,
         name: created.name || name,
         joinedAt: new Date().toISOString(),
+        ownerSub: this.getCurrentUserSub(),
+        joinCode: created.joinCode,
+        isShared: false,
       };
       this.state.canvases = [canvas, ...this.state.canvases];
+      this.partitionCanvases();
       this.closeCreateCanvas();
       this.renderSidebar();
       this.selectCanvas(canvas.id);
