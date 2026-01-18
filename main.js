@@ -1,5 +1,11 @@
+const Sentry = require("@sentry/electron/main");
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
+
+// Initialize Sentry for error tracking in the main process
+Sentry.init({
+  dsn: "https://425bf24215fb0f2b15cf752b09a5d7ae@o4510728718909440.ingest.us.sentry.io/4510728772648960",
+});
 
 let mainWindow;
 
