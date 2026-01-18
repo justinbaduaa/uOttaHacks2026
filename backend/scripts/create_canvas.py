@@ -7,9 +7,12 @@ from _common import log, print_title, request_json
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a new canvas.")
-    parser.add_argument("--name", default=os.getenv("CANVAS_NAME", ""), help="Canvas name")
-    parser.add_argument("--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")
-    parser.add_argument("--auth-token", default=os.getenv("AUTH_TOKEN", ""), help="Bearer token or raw token")
+    parser.add_argument(
+        "--name", default=os.getenv("CANVAS_NAME", ""), help="Canvas name")
+    parser.add_argument(
+        "--api-base-url", default=os.getenv("API_BASE_URL", ""), help="API base URL")
+    parser.add_argument("--auth-token", default=os.getenv("AUTH_TOKEN",
+                        ""), help="Bearer token or raw token")
     args = parser.parse_args()
 
     name = args.name.strip() if args.name else ""

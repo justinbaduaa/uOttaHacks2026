@@ -27,6 +27,11 @@ from lib.validation import (
 
 logger = get_logger(__name__)
 
+from lib.sentry import init_sentry
+init_sentry()
+
+def handler(event, context):
+    1 / 0
 
 def get_nodes(event, context):
     """GET /nodes - List nodes for a canvas, optionally filtered by parent and updatedSince."""
