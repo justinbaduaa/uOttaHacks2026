@@ -86,15 +86,22 @@ Authorization: Bearer <jwt-token>
 #### Node Management
 
 - `GET /nodes?canvasId={id}&parentNodeId={id}&updatedSince={iso8601}` - List nodes
+<<<<<<< HEAD
 - `GET /nodes?canvasId={id}&updatedSince={iso8601}&includeAll=true` - List all nodes updated since
+=======
+- `GET /nodes/{nodeId}?canvasId={id}` - Get a single node
+>>>>>>> origin/solace-integration
 - `POST /nodes` - Create a new node
 - `PATCH /nodes/{nodeId}` - Update a node
 - `DELETE /nodes/{nodeId}?canvasId={id}` - Delete node and descendants
+- `POST /nodes/{nodeId}/execute` - Trigger agent execution via gateway
+- `POST /nodes/{nodeId}/approve` - Approve or reject a pending agent action
 
 #### File Management
 
 - `POST /files/presign` - Get presigned URL for file upload
 - `POST /files/complete` - Complete file upload and attach to node
+- `POST /files/presign-download` - Get presigned URL for file download
 
 ## Response Format
 
@@ -133,16 +140,43 @@ Authorization: Bearer <jwt-token>
 - `parentNodeId` ("ROOT" or UUID)
 - `title` (string)
 - `description` (string)
-- `inputs` (array of file items)
-- `outputs` (array of file items)
-- `evidence` (object with `notes` array of strings and `files` array of file items)
+- `inputs` (array of item objects)
+- `outputs` (array of item objects)
+- `evidence` (array of item objects)
+- `status` ("draft" | "ready" | "in_progress" | "blocked" | "completed" | "failed")
+- `approvalMode` ("auto" | "approve_nodes" | "approve_all")
+- `assignedTo` (object with `type` and `id`)
+- `approvalRequests` (array of approval request objects)
+- `activityLog` (array of log entries)
+- `activeTaskId` (string, task id for current execution)
 - `authorSub` (Cognito user ID)
 - `createdAt` (ISO8601)
 - `updatedAt` (ISO8601)
 
-### File Item
-- `type` - "text" | "link" | "file"
+Note: When `status` is set to `completed` and `assignedTo.type` is `agent`, evidence must be non-empty.
+
+### Item Object
+- `type` - "text" | "link" | "file" | "node"
+- For type="text": `text`
+- For type="link": `url`
 - For type="file": `fileId`, `s3Key`, `filename`, `contentType`
+- For type="node": `nodeId`, optional `include` ("outputs" | "evidence" | "all")
+
+### Approval Request Object
+- `approvalId` (UUID)
+- `type` ("propose_subnode" | "add_output" | "add_evidence" | "complete_node")
+- `status` ("pending" | "approved" | "rejected" | "applied")
+- `requestedAt` (ISO8601)
+- `requestedBy` (object with `type` and `id`)
+- `payload` (object)
+- `rationale` (string, optional)
+
+### Activity Log Entry
+- `logId` (UUID)
+- `type` ("status" | "action" | "approval" | "artifact" | "error")
+- `message` (string)
+- `createdAt` (ISO8601)
+- `data` (object)
 
 ## Local Development
 

@@ -361,7 +361,11 @@ def complete_file(event, context):
         updated_item = response["Attributes"]
         evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
         if evidence_error:
+<<<<<<< HEAD
             evidence = {"notes": [], "files": []}
+=======
+            evidence = []
+>>>>>>> origin/solace-integration
 
         logger.info(
             f"Completed file upload for node {node_id} in canvas {canvas_id}: "
@@ -378,6 +382,15 @@ def complete_file(event, context):
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
             "evidence": evidence,
+<<<<<<< HEAD
+=======
+            "status": updated_item.get("status") or "draft",
+            "approvalMode": updated_item.get("approvalMode"),
+            "assignedTo": updated_item.get("assignedTo"),
+            "approvalRequests": updated_item.get("approvalRequests", []),
+            "activityLog": updated_item.get("activityLog", []),
+            "activeTaskId": updated_item.get("activeTaskId"),
+>>>>>>> origin/solace-integration
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
@@ -390,20 +403,32 @@ def complete_file(event, context):
         return internal_error_response("Failed to complete file upload")
 
 
+<<<<<<< HEAD
 def download_file(event, context):
     """POST /files/download - Generate a presigned URL for file download."""
     try:
         # Require authentication
+=======
+def presign_download(event, context):
+    """POST /files/presign-download - Generate a presigned URL for file download."""
+    try:
+>>>>>>> origin/solace-integration
         user_sub, auth_error = require_auth(event)
         if auth_error:
             return auth_error
 
+<<<<<<< HEAD
         # Parse request body
+=======
+>>>>>>> origin/solace-integration
         body, parse_error = parse_body(event)
         if parse_error:
             return parse_error
 
+<<<<<<< HEAD
         # Validate required fields
+=======
+>>>>>>> origin/solace-integration
         canvas_id = body.get("canvasId")
         if not canvas_id:
             return error_response(
@@ -415,11 +440,15 @@ def download_file(event, context):
         if not valid:
             return error_response(code="INVALID_REQUEST", message=error_msg)
 
+<<<<<<< HEAD
         # Check membership
+=======
+>>>>>>> origin/solace-integration
         is_member, membership_error = require_membership(canvas_id, user_sub)
         if not is_member:
             return membership_error
 
+<<<<<<< HEAD
         scope = body.get("scope") or "node"
         if scope not in ["node", "canvas"]:
             return error_response(
@@ -427,6 +456,19 @@ def download_file(event, context):
                 message="scope must be 'node' or 'canvas'",
             )
 
+=======
+        node_id = body.get("nodeId")
+        if not node_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="nodeId is required",
+            )
+
+        valid, error_msg = validate_node_id(node_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+>>>>>>> origin/solace-integration
         file_id = body.get("fileId")
         s3_key = body.get("s3Key")
         if not file_id and not s3_key:
@@ -435,6 +477,7 @@ def download_file(event, context):
                 message="fileId or s3Key is required",
             )
 
+<<<<<<< HEAD
         candidates = []
         if scope == "node":
             node_id = body.get("nodeId")
@@ -494,29 +537,80 @@ def download_file(event, context):
                 break
 
         if not matched:
+=======
+        node = get_node(canvas_id, node_id)
+        if not node:
+            return error_response(
+                code="NOT_FOUND",
+                message="Node not found",
+                status_code=404,
+            )
+
+        file_item = None
+        for slot in ["inputs", "outputs", "evidence"]:
+            items = node.get(slot, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if item.get("type") != "file":
+                    continue
+                if file_id and item.get("fileId") == file_id:
+                    file_item = item
+                    break
+                if s3_key and item.get("s3Key") == s3_key:
+                    file_item = item
+                    break
+            if file_item:
+                break
+
+        if not file_item:
+>>>>>>> origin/solace-integration
             return error_response(
                 code="NOT_FOUND",
                 message="File not found on node",
                 status_code=404,
             )
 
+<<<<<<< HEAD
         resolved_key = matched.get("s3Key")
         if not resolved_key:
             return internal_error_response("Missing s3Key for file")
 
         download_url = generate_presigned_get_url(resolved_key)
+=======
+        s3_key = file_item.get("s3Key")
+        if not s3_key:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="File item missing s3Key",
+            )
+
+        download_url = generate_presigned_get_url(s3_key)
+>>>>>>> origin/solace-integration
         if not download_url:
             return internal_error_response("Failed to generate presigned URL")
 
         return success_response({
+<<<<<<< HEAD
             "fileId": matched.get("fileId"),
             "s3Key": resolved_key,
             "filename": matched.get("filename"),
             "contentType": matched.get("contentType"),
+=======
+            "fileId": file_item.get("fileId"),
+            "s3Key": s3_key,
+            "filename": file_item.get("filename"),
+            "contentType": file_item.get("contentType", "application/octet-stream"),
+>>>>>>> origin/solace-integration
             "downloadUrl": download_url,
             "expiresInSeconds": 3600,
         })
 
     except Exception as e:
+<<<<<<< HEAD
         logger.error(f"Error generating download URL: {str(e)}", exc_info=True)
         return internal_error_response("Failed to generate download URL")
+=======
+        logger.error(f"Error generating presigned download URL: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to generate presigned URL")
+>>>>>>> origin/solace-integration

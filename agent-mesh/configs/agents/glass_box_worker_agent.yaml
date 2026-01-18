@@ -1,0 +1,77 @@
+# Solace Agent Mesh Agent Configuration
+
+log:
+  stdout_log_level: INFO
+  log_file_level: DEBUG
+  log_file: a2a_agent.log
+
+!include ../shared_config.yaml
+
+apps:
+  - name: "GlassBoxWorker__app"
+    app_base_path: .
+    app_module: solace_agent_mesh.agent.sac.app
+    broker:
+      <<: *broker_connection
+
+    app_config:
+      namespace: "${NAMESPACE}"
+      supports_streaming: true
+      agent_name: "GlassBoxWorker"
+      display_name: "Glass Box Worker Agent"
+      model: *general_model 
+
+      instruction: |
+        You are the GlassBoxWorker agent.
+        - Humans define nodes and inputs before execution. Do not create top-level nodes.
+        - Provide evidence for agent-assigned tasks before completion.
+        - Use artifact tools to produce files and drafts, and request the gateway to attach them.
+        - If inputs reference other nodes, treat those outputs/evidence as context.
+        - To request state changes, emit a DataPart with:
+          {"type":"glassbox_action","action":"propose_subnode|add_output|add_evidence|complete_node","payload":{...},"rationale":"..."}
+        - Include a rationale for any action that requires approval (subnode creation, completion, or approve_all mode).
+        - For file artifacts, prefix filenames with evidence__ to attach as evidence; otherwise they go to outputs.
+      
+      tools:
+        - group_name: artifact_management
+          tool_type: builtin-group
+        - tool_type: builtin-group
+          group_name: "data_analysis"
+        - tool_type: python
+          component_module: "src.glass_box_tools.yellowcake"
+          function_name: "yellowcake_extract"
+          tool_name: "yellowcake_extract"
+          tool_description: "Extract structured data from a URL using Yellowcake (SSE)."
+          tool_config:
+            api_key: ${YELLOWCAKE_API_KEY}
+            base_url: ${YELLOWCAKE_API_BASE_URL, "https://api.yellowcake.dev/v1/extract-stream"}
+            timeout_seconds: ${YELLOWCAKE_TIMEOUT_SECONDS, 900}
+
+      session_service: 
+        type: "sql"
+        default_behavior: "PERSISTENT"
+        database_url: "${GLASS_BOX_WORKER_DATABASE_URL, sqlite:///glass_box_worker.db}"
+      artifact_service: *default_artifact_service
+      
+      artifact_handling_mode: "reference"
+      enable_embed_resolution: true
+      enable_artifact_content_instruction: true
+      data_tools_config: *default_data_tools_config
+
+      # Agent Card Definition
+      agent_card:
+        description: |
+          Glass Box worker agent focused on producing auditable outputs and evidence.
+        defaultInputModes: [text] 
+        defaultOutputModes: [text, file] 
+        skills: []
+      
+      # Discovery & Communication
+      agent_card_publishing: 
+        interval_seconds: 10
+      agent_discovery: 
+        enabled: true
+      inter_agent_communication:
+        allow_list: [] 
+        deny_list: [] 
+        request_timeout_seconds: 600

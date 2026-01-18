@@ -94,20 +94,38 @@ def validate_file_slot(slot: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-def validate_file_item(item: Dict) -> Tuple[bool, Optional[str]]:
-    """Validate a file item in inputs/outputs array."""
+def validate_io_item(item: Dict) -> Tuple[bool, Optional[str]]:
+    """Validate an item in inputs/outputs/evidence arrays."""
     if not isinstance(item, dict):
-        return False, "file item must be an object"
+        return False, "item must be an object"
     
-    file_type = item.get("type")
-    if file_type not in ["text", "link", "file"]:
-        return False, "file item type must be one of: text, link, file"
+    item_type = item.get("type")
+    if item_type not in ["text", "link", "file", "node"]:
+        return False, "item type must be one of: text, link, file, node"
     
-    if file_type == "file":
+    if item_type == "file":
         required_fields = ["fileId", "s3Key", "filename"]
         for field in required_fields:
             if not item.get(field):
                 return False, f"file item of type 'file' must have {field}"
+    elif item_type == "text":
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return False, "text item must have non-empty text"
+    elif item_type == "link":
+        url = item.get("url")
+        if not isinstance(url, str) or not url.strip():
+            return False, "link item must have non-empty url"
+    elif item_type == "node":
+        node_id = item.get("nodeId")
+        if not isinstance(node_id, str) or not node_id.strip():
+            return False, "node item must have nodeId"
+        valid, error = validate_node_id(node_id)
+        if not valid:
+            return False, error
+        include = item.get("include")
+        if include is not None and include not in ["outputs", "evidence", "all"]:
+            return False, "node include must be one of: outputs, evidence, all"
     
     return True, None
 
@@ -118,18 +136,98 @@ def validate_inputs_outputs(items: List[Dict]) -> Tuple[bool, Optional[str]]:
         return False, "inputs/outputs must be an array"
     
     for item in items:
-        valid, error = validate_file_item(item)
+        valid, error = validate_io_item(item)
         if not valid:
             return False, error
     
     return True, None
 
 
+<<<<<<< HEAD
 def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+=======
+def validate_node_status(status: str) -> Tuple[bool, Optional[str]]:
+    """Validate node status."""
+    allowed = ["draft", "ready", "in_progress", "blocked", "completed", "failed"]
+    if status not in allowed:
+        return False, f"status must be one of: {', '.join(allowed)}"
+    return True, None
+
+
+def validate_approval_mode(mode: str) -> Tuple[bool, Optional[str]]:
+    """Validate approval mode."""
+    allowed = ["auto", "approve_nodes", "approve_all"]
+    if mode not in allowed:
+        return False, f"approvalMode must be one of: {', '.join(allowed)}"
+    return True, None
+
+
+def validate_assigned_to(assigned_to: Any) -> Tuple[bool, Optional[str]]:
+    """Validate assignedTo payload."""
+    if not isinstance(assigned_to, dict):
+        return False, "assignedTo must be an object"
+    assignee_type = assigned_to.get("type")
+    if assignee_type not in ["human", "agent"]:
+        return False, "assignedTo.type must be either 'human' or 'agent'"
+    assignee_id = assigned_to.get("id")
+    if not isinstance(assignee_id, str) or not assignee_id.strip():
+        return False, "assignedTo.id must be a non-empty string"
+    return True, None
+
+
+def validate_activity_log(entries: Any) -> Tuple[bool, Optional[str]]:
+    """Validate activity log entries (list of dicts)."""
+    if entries is None:
+        return True, None
+    if not isinstance(entries, list):
+        return False, "activityLog must be an array"
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False, "activityLog entries must be objects"
+        entry_type = entry.get("type")
+        if entry_type is not None and not isinstance(entry_type, str):
+            return False, "activityLog.type must be a string"
+        message = entry.get("message")
+        if message is not None and not isinstance(message, str):
+            return False, "activityLog.message must be a string"
+    return True, None
+
+
+def validate_approval_requests(requests: Any) -> Tuple[bool, Optional[str]]:
+    """Validate approvalRequests payload."""
+    if requests is None:
+        return True, None
+    if not isinstance(requests, list):
+        return False, "approvalRequests must be an array"
+    allowed_statuses = ["pending", "approved", "rejected", "applied"]
+    for request_item in requests:
+        if not isinstance(request_item, dict):
+            return False, "approvalRequests entries must be objects"
+        approval_id = request_item.get("approvalId")
+        if approval_id is not None and not isinstance(approval_id, str):
+            return False, "approvalRequests.approvalId must be a string"
+        status = request_item.get("status")
+        if status is not None and status not in allowed_statuses:
+            return False, "approvalRequests.status must be one of: pending, approved, rejected, applied"
+    return True, None
+
+
+def validate_approval_decision(decision: Any) -> Tuple[bool, Optional[str]]:
+    """Validate approval decision payload."""
+    if not isinstance(decision, str):
+        return False, "decision must be a string"
+    if decision not in ["approved", "rejected"]:
+        return False, "decision must be one of: approved, rejected"
+    return True, None
+
+
+def normalize_evidence(evidence: Any) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+>>>>>>> origin/solace-integration
     """
     Normalize and validate evidence payload.
     
     Evidence format:
+<<<<<<< HEAD
       {
         "notes": ["text", ...] | "text",
         "files": [file_item, ...]
@@ -140,6 +238,25 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
 
     if not isinstance(evidence, dict):
         return None, "evidence must be an object"
+=======
+      [
+        { "type": "text", "text": "..." },
+        { "type": "file", "fileId": "...", "s3Key": "...", "filename": "..." }
+      ]
+    """
+    if evidence is None:
+        return [], None
+
+    if isinstance(evidence, list):
+        for item in evidence:
+            valid, error = validate_io_item(item)
+            if not valid:
+                return None, f"evidence: {error}"
+        return evidence, None
+
+    if not isinstance(evidence, dict):
+        return None, "evidence must be an array of items"
+>>>>>>> origin/solace-integration
 
     notes = evidence.get("notes", [])
     files = evidence.get("files", [])
@@ -147,6 +264,7 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
     if isinstance(notes, str):
         notes = [notes]
     if not isinstance(notes, list):
+<<<<<<< HEAD
         return None, "evidence.notes must be a string or array"
     normalized_notes = []
     for idx, note in enumerate(notes):
@@ -184,3 +302,23 @@ def normalize_evidence(evidence: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
             return None, f"evidence.files: {error}"
 
     return {"notes": normalized_notes, "files": files}, None
+=======
+        return None, "evidence.notes must be a string or array of strings"
+    for note in notes:
+        if not isinstance(note, str):
+            return None, "evidence.notes must contain only strings"
+
+    if not isinstance(files, list):
+        return None, "evidence.files must be an array"
+
+    normalized: List[Dict[str, Any]] = []
+    for note in notes:
+        normalized.append({"type": "text", "text": note})
+    for item in files:
+        valid, error = validate_io_item(item)
+        if not valid:
+            return None, f"evidence.files: {error}"
+        normalized.append(item)
+
+    return normalized, None
+>>>>>>> origin/solace-integration

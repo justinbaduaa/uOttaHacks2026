@@ -9,6 +9,7 @@ from lib.dynamodb import get_canvas_table, get_node, get_nodes_table, require_me
 from lib.logging import get_logger
 from lib.response import error_response, internal_error_response, success_response
 from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
+from lib.s3 import generate_presigned_get_url, generate_presigned_put_url
 from lib.validation import (
     parse_body,
     validate_canvas_id,
@@ -361,7 +362,7 @@ def complete_file(event, context):
         updated_item = response["Attributes"]
         evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
         if evidence_error:
-            evidence = {"notes": [], "files": []}
+            evidence = []
 
         logger.info(
             f"Completed file upload for node {node_id} in canvas {canvas_id}: "
@@ -378,6 +379,12 @@ def complete_file(event, context):
             "inputs": updated_item.get("inputs", []),
             "outputs": updated_item.get("outputs", []),
             "evidence": evidence,
+            "status": updated_item.get("status") or "draft",
+            "approvalMode": updated_item.get("approvalMode"),
+            "assignedTo": updated_item.get("assignedTo"),
+            "approvalRequests": updated_item.get("approvalRequests", []),
+            "activityLog": updated_item.get("activityLog", []),
+            "activeTaskId": updated_item.get("activeTaskId"),
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
