@@ -8,6 +8,7 @@ const COGNITO_CLIENT_ID = "6260nb86n0snfo7ej0edmc1thj";
 const COGNITO_REDIRECT_URI = "http://localhost:8787/callback";
 const COGNITO_SCOPES = "openid email profile";
 const API_BASE_URL = "https://jwsg89orxe.execute-api.us-east-1.amazonaws.com";
+const API_TIMEOUT_MS = 15000;
 
 let mainWindow;
 let authWindow;
@@ -214,14 +215,28 @@ async function apiRequest({ path, method = "GET", body, token }) {
     console.log(`[API] payload: ${JSON.stringify(body)}`);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${API_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   let payload = null;
   try {

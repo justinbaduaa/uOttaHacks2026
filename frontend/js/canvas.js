@@ -1155,12 +1155,14 @@ const Canvas = {
 
     const iconName = nodeData.icon || 'box';
     const inputs = nodeData.inputs || [];
+    const outputs = nodeData.outputs || [];
     const evidenceFiles = (nodeData.evidence || []).filter(item => item.type === 'file');
     // If no inputs (new node), showing some mocks provided by user request or keep empty
     // The user request said "drop in it... add a number of resources... dropdown to view"
     // So we start empty or with existing data.
 
     const fileCount = inputs.length + evidenceFiles.length;
+    const outputCount = outputs.length;
     const layerCount = this.getChildNodes(nodeData.id)?.length || 0;
 
     element.innerHTML = `
@@ -1230,20 +1232,32 @@ const Canvas = {
 
         <!-- Start Output Toggle -->
         <button class="node-footer-toggle" aria-label="Toggle Output">
-          <span class="adjust-text">View Output</span>
+          <span class="adjust-text">Output</span>
           <i data-lucide="chevron-down"></i>
         </button>
-        
+
         <!-- Output Section -->
         <div class="node-output">
           <div class="node-output-header">
-            <span class="output-icon"><i data-lucide="play"></i></span>
-            <span class="output-title">Output</span>
+            <span class="output-icon"><i data-lucide="layers"></i></span>
+            <span class="output-title">Output (${outputCount})</span>
+            <button class="output-list-toggle" aria-label="Toggle Outputs" ${outputCount === 0 ? 'disabled' : ''}>
+              <i data-lucide="chevron-down"></i>
+            </button>
           </div>
-          <p class="node-output-description">Create filtered views that you can save and share with others</p>
-          <div class="node-output-actions">
-            <button class="output-open-btn">Open views</button>
-            <a class="output-learn-more">Learn more ›</a>
+          <div class="output-list-container" style="display: none;">
+            <div class="output-list">
+              ${outputs.map(output => `
+                <div class="input-item" data-file-id="${this.escapeHtml(output.fileId || '')}" data-s3-key="${this.escapeHtml(output.s3Key || '')}">
+                  <span class="input-item-icon"><i data-lucide="file"></i></span>
+                  <span class="input-item-text">${this.escapeHtml(output.filename || output.name || 'File')}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="drop-zone output-drop-zone">
+            <i data-lucide="upload-cloud"></i>
+            <span>Drop files here</span>
           </div>
         </div>
       </div>
@@ -1283,6 +1297,11 @@ const Canvas = {
     const inputToggle = element.querySelector('.input-list-toggle');
     const inputTitle = element.querySelector('.input-title');
     const fileCountText = element.querySelector('.file-count-text');
+    const outputListContainer = element.querySelector('.output-list-container');
+    const outputList = element.querySelector('.output-list');
+    const outputToggle = element.querySelector('.output-list-toggle');
+    const outputTitle = element.querySelector('.output-title');
+    const outputDropZone = element.querySelector('.output-drop-zone');
 
     if (dropZone) {
       dropZone.addEventListener('dragover', (e) => {
@@ -1299,7 +1318,7 @@ const Canvas = {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove('drag-over');
-        this.handleNodeDrop(e, nodeData, inputList, inputToggle, inputTitle, fileCountText);
+        this.handleNodeDrop(e, nodeData, inputList, inputToggle, inputTitle, fileCountText, 'inputs');
       });
        // Prevent drag start on the drop zone itself from moving the node
        dropZone.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -1318,6 +1337,46 @@ const Canvas = {
 
     if (inputListContainer) {
       inputListContainer.addEventListener('click', (e) => {
+        const item = e.target.closest('.input-item[data-file-id], .input-item[data-s3-key]');
+        if (!item) return;
+        const fileId = item.dataset.fileId || '';
+        const s3Key = item.dataset.s3Key || '';
+        this.downloadNodeFile(nodeData, { fileId, s3Key });
+      });
+    }
+
+    if (outputDropZone) {
+      outputDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.add('drag-over');
+      });
+      outputDropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.remove('drag-over');
+      });
+      outputDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        outputDropZone.classList.remove('drag-over');
+        this.handleNodeDrop(e, nodeData, outputList, outputToggle, outputTitle, null, 'outputs');
+      });
+      outputDropZone.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    if (outputToggle && outputListContainer) {
+      outputToggle.addEventListener('mousedown', (e) => e.stopPropagation());
+      outputToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = outputListContainer.style.display === 'none';
+        outputListContainer.style.display = isHidden ? 'block' : 'none';
+        outputToggle.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+      });
+    }
+
+    if (outputList) {
+      outputList.addEventListener('click', (e) => {
         const item = e.target.closest('.input-item[data-file-id], .input-item[data-s3-key]');
         if (!item) return;
         const fileId = item.dataset.fileId || '';
@@ -1363,10 +1422,9 @@ const Canvas = {
     const titleEl = element.querySelector('.node-title');
     const descriptionEl = element.querySelector('.node-description');
     
-    // Toggle Logic with new footer button
     const toggleBtn = element.querySelector('.node-footer-toggle');
     if (toggleBtn) {
-      toggleBtn.addEventListener('mousedown', (e) => e.stopPropagation()); // Prevent drag
+      toggleBtn.addEventListener('mousedown', (e) => e.stopPropagation());
       toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         element.classList.toggle('expanded');
@@ -1741,7 +1799,7 @@ const Canvas = {
     setTimeout(() => node.element.classList.remove('focused'), 2000);
   },
 
-  async handleNodeDrop(e, nodeData, listContainer, toggleBtn, titleEl, countEl) {
+  async handleNodeDrop(e, nodeData, listContainer, toggleBtn, titleEl, countEl, slot = 'inputs') {
     let files = [];
     if (e.dataTransfer.items) {
       files = [...e.dataTransfer.items].filter(item => item.kind === 'file').map(item => item.getAsFile());
@@ -1756,7 +1814,7 @@ const Canvas = {
     }
 
     if (toggleBtn) toggleBtn.disabled = true;
-    if (titleEl) titleEl.textContent = 'Input (uploading...)';
+    if (titleEl) titleEl.textContent = `${slot === 'outputs' ? 'Output' : 'Input'} (uploading...)`;
 
     const canvasId = this.state.selectedCanvasId;
     const nodeId = nodeData.id;
@@ -1767,7 +1825,7 @@ const Canvas = {
         const presigned = await Api.presignFile({
           canvasId,
           nodeId,
-          slot: 'inputs',
+          slot,
           filename: file.name,
           contentType,
         });
@@ -1778,7 +1836,7 @@ const Canvas = {
         const updated = await Api.completeFile({
           canvasId,
           nodeId,
-          slot: 'inputs',
+          slot,
           fileId: presigned.fileId,
           s3Key: presigned.s3Key,
           filename: file.name,
@@ -1798,15 +1856,22 @@ const Canvas = {
 
     const updatedNode = this.getNode(nodeId);
     const evidenceFiles = (updatedNode?.evidence || []).filter(item => item.type === 'file');
-    const total = (updatedNode?.inputs || []).length + evidenceFiles.length;
-    if (titleEl) titleEl.textContent = `Input (${total})`;
-    if (countEl) countEl.textContent = total;
+    const inputTotal = (updatedNode?.inputs || []).length + evidenceFiles.length;
+    const outputTotal = (updatedNode?.outputs || []).length || 0;
+    if (titleEl) {
+      titleEl.textContent = slot === 'outputs'
+        ? `Output (${outputTotal})`
+        : `Input (${inputTotal})`;
+    }
+    if (countEl) countEl.textContent = inputTotal;
     if (toggleBtn) toggleBtn.disabled = false;
 
-    if (listContainer && listContainer.parentElement) {
-      listContainer.parentElement.style.display = 'block';
+    if (slot !== 'outputs') {
+      if (listContainer && listContainer.parentElement) {
+        listContainer.parentElement.style.display = 'block';
+      }
+      if (toggleBtn) toggleBtn.style.transform = 'rotate(180deg)';
     }
-    if (toggleBtn) toggleBtn.style.transform = 'rotate(180deg)';
   },
 
   async downloadNodeFile(nodeData, fileMeta) {
@@ -2305,6 +2370,8 @@ const Canvas = {
         const incomingEvidenceCount = Array.isArray(incoming.evidence) ? incoming.evidence.length : 0;
         const existingInputsCount = Array.isArray(existing.inputs) ? existing.inputs.length : 0;
         const incomingInputsCount = Array.isArray(incoming.inputs) ? incoming.inputs.length : 0;
+        const existingOutputsCount = Array.isArray(existing.outputs) ? existing.outputs.length : 0;
+        const incomingOutputsCount = Array.isArray(incoming.outputs) ? incoming.outputs.length : 0;
         Object.assign(existing, incoming);
         const rendered = renderedById.get(incoming.id);
         if (rendered) {
@@ -2322,7 +2389,11 @@ const Canvas = {
             rendered.element.style.transform = `translate(${incoming.x}px, ${incoming.y}px)`;
           }
         }
-        if (existingEvidenceCount !== incomingEvidenceCount || existingInputsCount !== incomingInputsCount) {
+        if (
+          existingEvidenceCount !== incomingEvidenceCount ||
+          existingInputsCount !== incomingInputsCount ||
+          existingOutputsCount !== incomingOutputsCount
+        ) {
           needsRefresh = true;
         }
       } else {

@@ -358,7 +358,8 @@ html, body {
 }
 
 .canvas-create {
-  padding: var(--space-2) var(--space-1) var(--space-3);
+  margin-top: auto;
+  padding: var(--space-2) var(--space-3) 0;
 }
 
 /* ========================================
@@ -1066,24 +1067,22 @@ html, body {
   margin-left: calc(var(--space-5) * -1);
   margin-right: calc(var(--space-5) * -1);
   margin-bottom: calc(var(--space-5) * -1);
-  /* padding is handled when expanded */
   background: #1a1a24;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  /* border-top removed here, handled by toggle */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   opacity: 0;
   max-height: 0;
   overflow: hidden;
-  overflow: hidden;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-node.expanded .node-output {
   opacity: 1;
-  max-height: 200px;
+  max-height: 260px;
   padding: var(--space-4) var(--space-5);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .node-output-header {
@@ -1114,46 +1113,24 @@ html, body {
   color: var(--text-primary);
 }
 
-.node-output-description {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.node-output-actions {
+.output-list {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: var(--space-2);
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: 2px;
 }
 
-.output-open-btn {
-  padding: var(--space-2) var(--space-4);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
+.output-drop-zone {
+  border-color: rgba(129, 140, 248, 0.35);
+  background: rgba(124, 58, 237, 0.08);
 }
 
-.output-open-btn:hover {
-  background: var(--sidebar-hover);
-  border-color: var(--border-strong);
-}
-
-.output-learn-more {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  text-decoration: none;
-  cursor: pointer;
-  transition: color var(--transition-fast);
-}
-
-.output-learn-more:hover {
-  color: var(--text-primary);
+.output-drop-zone:hover,
+.output-drop-zone.drag-over {
+  border-color: rgba(129, 140, 248, 0.8);
+  background: rgba(124, 58, 237, 0.18);
+  color: #c7d2fe;
 }
 
 /* Node Editable Fields */
@@ -1523,6 +1500,12 @@ button {
   padding-top: var(--space-2);
 }
 
+.output-list-container {
+  margin-top: var(--space-2);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: var(--space-2);
+}
+
 .input-item {
   display: flex;
   align-items: center;
@@ -1549,11 +1532,32 @@ button {
   align-items: center;
 }
 
+.output-list-toggle {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  margin-left: auto;
+  transition: transform var(--transition-fast);
+  display: flex;
+  align-items: center;
+}
+
 .input-list-toggle:hover {
   color: var(--text-primary);
 }
 
 .input-list-toggle:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.output-list-toggle:hover {
+  color: var(--text-primary);
+}
+
+.output-list-toggle:disabled {
   opacity: 0.3;
   cursor: default;
 }
