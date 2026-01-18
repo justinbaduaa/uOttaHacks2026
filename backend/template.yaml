@@ -2,6 +2,14 @@ AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 Description: Glass Box Collaborative Canvas Backend
 
+Parameters:
+  GatewayApiBaseUrl:
+    Type: String
+    Default: ""
+  GatewaySharedSecret:
+    Type: String
+    Default: ""
+
 Globals:
   Function:
     Runtime: python3.13
@@ -13,6 +21,8 @@ Globals:
         NODES_TABLE: !Ref NodesTable
         FILES_BUCKET: !Ref FilesBucket
         USER_POOL_ID: !Ref UserPool
+        GATEWAY_API_BASE_URL: !Ref GatewayApiBaseUrl
+        GATEWAY_SHARED_SECRET: !Ref GatewaySharedSecret
 
 Resources:
   # Cognito User Pool
@@ -288,6 +298,44 @@ Resources:
                 - s3:DeleteObject
                 - s3:DeleteObjectVersion
               Resource: !Sub arn:${AWS::Partition}:s3:::${FilesBucket}/*
+
+  ExecuteNodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxExecuteNode
+      CodeUri: src/
+      Handler: handlers.nodes.execute_node
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /nodes/{nodeId}/execute
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
+
+  ApproveNodeActionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GlassBoxApproveNodeAction
+      CodeUri: src/
+      Handler: handlers.nodes.approve_node_action
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: post
+            Path: /nodes/{nodeId}/approve
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CanvasTable
 
   PresignFileFunction:
     Type: AWS::Serverless::Function

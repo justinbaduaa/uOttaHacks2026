@@ -30,6 +30,27 @@ class GlassBoxGatewayGatewayApp(BaseGatewayApp):
     # under the 'app_config' section.
     SPECIFIC_APP_SCHEMA_PARAMS: List[Dict[str, Any]] = [
         {
+            "name": "gateway_host",
+            "required": False,
+            "type": "string",
+            "default": "127.0.0.1",
+            "description": "Host for the GlassBox gateway HTTP listener.",
+        },
+        {
+            "name": "gateway_port",
+            "required": False,
+            "type": "integer",
+            "default": 8001,
+            "description": "Port for the GlassBox gateway HTTP listener.",
+        },
+        {
+            "name": "gateway_shared_secret",
+            "required": False,
+            "type": "string",
+            "default": "",
+            "description": "Shared secret required for execute requests (optional).",
+        },
+        {
             "name": "backend_api_base_url",
             "required": True,
             "type": "string",
@@ -83,6 +104,13 @@ class GlassBoxGatewayGatewayApp(BaseGatewayApp):
             "type": "string",
             "default": "s3",
             "description": "How gateway persists artifacts: s3, reference, or embed.",
+        },
+        {
+            "name": "approval_poll_interval_seconds",
+            "required": False,
+            "type": "integer",
+            "default": 5,
+            "description": "Polling interval in seconds for approval resolution.",
         },
     ]
 

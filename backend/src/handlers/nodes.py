@@ -1,8 +1,11 @@
 """Node-related Lambda handlers."""
 
+import json
+import os
 import uuid
 from datetime import datetime
 from typing import Dict, List
+from urllib import error, request
 
 from lib.auth import require_auth
 from lib.dynamodb import (
@@ -20,6 +23,9 @@ from lib.validation import (
     parse_body,
     parse_query_params,
     validate_approval_mode,
+    validate_approval_decision,
+    validate_activity_log,
+    validate_approval_requests,
     validate_assigned_to,
     validate_canvas_id,
     validate_inputs_outputs,
@@ -184,6 +190,9 @@ def create_node(event, context):
         approval_mode = body.get("approvalMode")
         assigned_to = body.get("assignedTo")
         status = body.get("status", "draft")
+        activity_log = body.get("activityLog")
+        approval_requests = body.get("approvalRequests")
+        active_task_id = body.get("activeTaskId")
 
         # Validate inputs/outputs
         if inputs:
@@ -207,6 +216,16 @@ def create_node(event, context):
 
         if assigned_to is not None:
             valid, error_msg = validate_assigned_to(assigned_to)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        if activity_log is not None:
+            valid, error_msg = validate_activity_log(activity_log)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        if approval_requests is not None:
+            valid, error_msg = validate_approval_requests(approval_requests)
             if not valid:
                 return error_response(code="INVALID_REQUEST", message=error_msg)
 
@@ -241,6 +260,9 @@ def create_node(event, context):
             "outputs": outputs or [],
             "evidence": normalized_evidence,
             "status": status,
+            "approvalRequests": approval_requests or [],
+            "activityLog": activity_log or [],
+            "activeTaskId": active_task_id,
             "authorSub": user_sub,
             "createdAt": now,
             "updatedAt": now,
@@ -266,6 +288,9 @@ def create_node(event, context):
             "status": status,
             "approvalMode": approval_mode,
             "assignedTo": assigned_to,
+            "approvalRequests": approval_requests or [],
+            "activityLog": activity_log or [],
+            "activeTaskId": active_task_id,
             "authorSub": user_sub,
             "createdAt": now,
             "updatedAt": now,
@@ -391,6 +416,32 @@ def update_node(event, context):
             expression_attribute_names["#approvalMode"] = "approvalMode"
             expression_attribute_values[":approvalMode"] = approval_mode
 
+        if "approvalRequests" in body:
+            approval_requests = body.get("approvalRequests")
+            valid, error_msg = validate_approval_requests(approval_requests)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+            update_expressions.append("approvalRequests = :approvalRequests")
+            expression_attribute_values[":approvalRequests"] = approval_requests or []
+
+        if "activityLog" in body:
+            activity_log = body.get("activityLog")
+            valid, error_msg = validate_activity_log(activity_log)
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+            update_expressions.append("activityLog = :activityLog")
+            expression_attribute_values[":activityLog"] = activity_log or []
+
+        if "activeTaskId" in body:
+            active_task_id = body.get("activeTaskId")
+            if active_task_id is not None and not isinstance(active_task_id, str):
+                return error_response(
+                    code="INVALID_REQUEST",
+                    message="activeTaskId must be a string or null",
+                )
+            update_expressions.append("activeTaskId = :activeTaskId")
+            expression_attribute_values[":activeTaskId"] = active_task_id
+
         if "assignedTo" in body:
             assigned_to = body.get("assignedTo")
             valid, error_msg = validate_assigned_to(assigned_to)
@@ -471,6 +522,9 @@ def update_node(event, context):
             "status": updated_item.get("status") or "draft",
             "approvalMode": updated_item.get("approvalMode"),
             "assignedTo": updated_item.get("assignedTo"),
+            "approvalRequests": updated_item.get("approvalRequests", []),
+            "activityLog": updated_item.get("activityLog", []),
+            "activeTaskId": updated_item.get("activeTaskId"),
             "authorSub": updated_item["authorSub"],
             "createdAt": updated_item["createdAt"],
             "updatedAt": updated_item["updatedAt"],
@@ -562,3 +616,285 @@ def delete_node(event, context):
     except Exception as e:
         logger.error(f"Error deleting node: {str(e)}", exc_info=True)
         return internal_error_response("Failed to delete node")
+
+
+def execute_node(event, context):
+    """POST /nodes/{nodeId}/execute - Trigger agent execution via gateway."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        path_params = event.get("pathParameters") or {}
+        node_id = path_params.get("nodeId")
+        if not node_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="nodeId path parameter is required",
+            )
+
+        valid, error_msg = validate_node_id(node_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        body, parse_error = parse_body(event)
+        if parse_error:
+            return parse_error
+
+        canvas_id = body.get("canvasId")
+        if not canvas_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="canvasId is required",
+            )
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        node = get_node(canvas_id, node_id)
+        if not node:
+            return error_response(
+                code="NOT_FOUND",
+                message="Node not found",
+                status_code=404,
+            )
+
+        assigned_to = node.get("assignedTo")
+        if not assigned_to or assigned_to.get("type") != "agent":
+            return error_response(
+                code="INVALID_REQUEST",
+                message="Node must be assigned to an agent before execution",
+            )
+
+        if "approvalMode" in body:
+            valid, error_msg = validate_approval_mode(body.get("approvalMode"))
+            if not valid:
+                return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        gateway_base_url = os.environ.get("GATEWAY_API_BASE_URL", "").strip().rstrip("/")
+        if not gateway_base_url:
+            return internal_error_response("Gateway API base URL is not configured")
+
+        headers = event.get("headers") or {}
+        auth_header = headers.get("authorization") or headers.get("Authorization") or ""
+        user_token = auth_header.strip()
+        if user_token and not user_token.startswith("Bearer "):
+            user_token = "Bearer " + user_token
+
+        payload = {
+            "canvasId": canvas_id,
+            "nodeId": node_id,
+        }
+        if user_token:
+            payload["userToken"] = user_token
+        if body.get("approvalMode"):
+            payload["approvalMode"] = body.get("approvalMode")
+
+        gateway_headers = {
+            "Content-Type": "application/json",
+        }
+        shared_secret = os.environ.get("GATEWAY_SHARED_SECRET", "").strip()
+        if shared_secret:
+            gateway_headers["X-Glassbox-Token"] = shared_secret
+
+        req = request.Request(
+            gateway_base_url + "/execute",
+            method="POST",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=gateway_headers,
+        )
+
+        try:
+            with request.urlopen(req, timeout=30) as response:
+                raw_body = response.read().decode("utf-8")
+                status = response.status
+        except error.HTTPError as exc:
+            raw_body = exc.read().decode("utf-8")
+            status = exc.code
+        except error.URLError as exc:
+            logger.error(f"Gateway call failed: {str(exc)}")
+            return internal_error_response("Failed to reach gateway")
+
+        if status >= 400:
+            return error_response(
+                code="GATEWAY_ERROR",
+                message="Gateway returned an error",
+                details={"status": status, "body": raw_body},
+                status_code=502,
+            )
+
+        try:
+            data = json.loads(raw_body) if raw_body else {"ok": True}
+        except ValueError:
+            data = {"raw": raw_body}
+
+        return success_response({
+            "gatewayResponse": data,
+        })
+
+    except Exception as e:
+        logger.error(f"Error executing node: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to execute node")
+
+
+def approve_node_action(event, context):
+    """POST /nodes/{nodeId}/approve - Resolve an approval request."""
+    try:
+        user_sub, auth_error = require_auth(event)
+        if auth_error:
+            return auth_error
+
+        path_params = event.get("pathParameters") or {}
+        node_id = path_params.get("nodeId")
+        if not node_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="nodeId path parameter is required",
+            )
+
+        valid, error_msg = validate_node_id(node_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        body, parse_error = parse_body(event)
+        if parse_error:
+            return parse_error
+
+        canvas_id = body.get("canvasId")
+        if not canvas_id:
+            return error_response(
+                code="INVALID_REQUEST",
+                message="canvasId is required",
+            )
+
+        valid, error_msg = validate_canvas_id(canvas_id)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        is_member, membership_error = require_membership(canvas_id, user_sub)
+        if not is_member:
+            return membership_error
+
+        approval_id = body.get("approvalId")
+        if not approval_id or not isinstance(approval_id, str):
+            return error_response(
+                code="INVALID_REQUEST",
+                message="approvalId is required",
+            )
+
+        decision = body.get("decision")
+        valid, error_msg = validate_approval_decision(decision)
+        if not valid:
+            return error_response(code="INVALID_REQUEST", message=error_msg)
+
+        reason = body.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            return error_response(
+                code="INVALID_REQUEST",
+                message="reason must be a string",
+            )
+
+        node = get_node(canvas_id, node_id)
+        if not node:
+            return error_response(
+                code="NOT_FOUND",
+                message="Node not found",
+                status_code=404,
+            )
+
+        approval_requests = node.get("approvalRequests", [])
+        updated_requests = []
+        found = False
+        now = datetime.utcnow().isoformat() + "Z"
+
+        for request_item in approval_requests:
+            if request_item.get("approvalId") == approval_id:
+                found = True
+                updated_item = dict(request_item)
+                updated_item["status"] = decision
+                updated_item["resolvedAt"] = now
+                updated_item["resolvedBy"] = user_sub
+                if reason:
+                    updated_item["reason"] = reason
+                updated_requests.append(updated_item)
+            else:
+                updated_requests.append(request_item)
+
+        if not found:
+            return error_response(
+                code="NOT_FOUND",
+                message="Approval request not found",
+                status_code=404,
+            )
+
+        activity_log = node.get("activityLog", [])
+        activity_log.append({
+            "logId": str(uuid.uuid4()),
+            "type": "approval",
+            "message": f"Approval {decision}: {approval_id}",
+            "createdAt": now,
+            "data": {
+                "approvalId": approval_id,
+                "decision": decision,
+                "reason": reason,
+            },
+        })
+
+        table = get_nodes_table()
+        update_expression = (
+            "SET approvalRequests = :approvalRequests, activityLog = :activityLog, "
+            "updatedAt = :now, authorSub = :authorSub, GSI1SK = :gsi1sk"
+        )
+        expression_attribute_values = {
+            ":approvalRequests": updated_requests,
+            ":activityLog": activity_log,
+            ":now": now,
+            ":authorSub": user_sub,
+            ":gsi1sk": f"UPDATED#{now}#NODE#{node_id}",
+        }
+
+        response = table.update_item(
+            Key={
+                "PK": f"CANVAS#{canvas_id}",
+                "SK": f"NODE#{node_id}",
+            },
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_attribute_values,
+            ReturnValues="ALL_NEW",
+        )
+
+        updated_item = response["Attributes"]
+        evidence, evidence_error = normalize_evidence(updated_item.get("evidence"))
+        if evidence_error:
+            evidence = []
+
+        updated_node = {
+            "nodeId": updated_item["nodeId"],
+            "canvasId": updated_item["canvasId"],
+            "parentNodeId": updated_item["parentNodeId"],
+            "title": updated_item["title"],
+            "description": updated_item["description"],
+            "inputs": updated_item.get("inputs", []),
+            "outputs": updated_item.get("outputs", []),
+            "evidence": evidence,
+            "status": updated_item.get("status") or "draft",
+            "approvalMode": updated_item.get("approvalMode"),
+            "assignedTo": updated_item.get("assignedTo"),
+            "approvalRequests": updated_item.get("approvalRequests", []),
+            "activityLog": updated_item.get("activityLog", []),
+            "activeTaskId": updated_item.get("activeTaskId"),
+            "authorSub": updated_item["authorSub"],
+            "createdAt": updated_item["createdAt"],
+            "updatedAt": updated_item["updatedAt"],
+        }
+
+        return success_response(updated_node)
+
+    except Exception as e:
+        logger.error(f"Error approving node action: {str(e)}", exc_info=True)
+        return internal_error_response("Failed to approve node action")

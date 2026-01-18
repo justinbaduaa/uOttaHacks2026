@@ -172,6 +172,52 @@ def validate_assigned_to(assigned_to: Any) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def validate_activity_log(entries: Any) -> Tuple[bool, Optional[str]]:
+    """Validate activity log entries (list of dicts)."""
+    if entries is None:
+        return True, None
+    if not isinstance(entries, list):
+        return False, "activityLog must be an array"
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False, "activityLog entries must be objects"
+        entry_type = entry.get("type")
+        if entry_type is not None and not isinstance(entry_type, str):
+            return False, "activityLog.type must be a string"
+        message = entry.get("message")
+        if message is not None and not isinstance(message, str):
+            return False, "activityLog.message must be a string"
+    return True, None
+
+
+def validate_approval_requests(requests: Any) -> Tuple[bool, Optional[str]]:
+    """Validate approvalRequests payload."""
+    if requests is None:
+        return True, None
+    if not isinstance(requests, list):
+        return False, "approvalRequests must be an array"
+    allowed_statuses = ["pending", "approved", "rejected", "applied"]
+    for request_item in requests:
+        if not isinstance(request_item, dict):
+            return False, "approvalRequests entries must be objects"
+        approval_id = request_item.get("approvalId")
+        if approval_id is not None and not isinstance(approval_id, str):
+            return False, "approvalRequests.approvalId must be a string"
+        status = request_item.get("status")
+        if status is not None and status not in allowed_statuses:
+            return False, "approvalRequests.status must be one of: pending, approved, rejected, applied"
+    return True, None
+
+
+def validate_approval_decision(decision: Any) -> Tuple[bool, Optional[str]]:
+    """Validate approval decision payload."""
+    if not isinstance(decision, str):
+        return False, "decision must be a string"
+    if decision not in ["approved", "rejected"]:
+        return False, "decision must be one of: approved, rejected"
+    return True, None
+
+
 def normalize_evidence(evidence: Any) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
     """
     Normalize and validate evidence payload.

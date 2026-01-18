@@ -1,4 +1,4 @@
-# Glass Box Agent Mesh Architecture (Scaffold v1)
+# Glass Box Agent Mesh Architecture (v1 Implementation)
 
 ## Goals and Constraints
 - Humans define nodes and inputs before execution; agents operate on those nodes.
@@ -27,6 +27,9 @@
    - `approve_nodes`: approvals required for new sub-nodes and completion.
    - `approve_all`: approvals required for every tool-action that mutates state.
 
+6. **Agent actions are structured.**
+   Agents emit `DataPart` action intents; the gateway is the only writer to backend state.
+
 ## System Components
 - **Glass Box Backend (AWS SAM)**: source of truth for canvases, nodes, inputs/outputs/evidence, and S3 files.
 - **Solace Event Broker**: A2A message backbone for agent orchestration and status updates.
@@ -38,7 +41,7 @@
 1. **Human defines node + inputs** in the UI and selects approval mode.
 2. **Assign to agent + Execute**:
    - Backend stores `assignedTo`, `approvalMode`, and `status=ready`.
-   - Backend calls the gateway to start the task.
+   - Backend calls the gateway `POST /execute` to start the task.
 3. **Gateway creates A2A task**:
    - Uses A2A request topic `{namespace}/a2a/v1/agent/request/{target_agent_name}`.
    - Includes node context, inputs, and resolved node references.
@@ -49,7 +52,7 @@
    - If approvals are needed, sends approval requests to UI and waits.
 6. **Gateway writes to backend**:
    - Uploads artifacts to S3 via `POST /files/presign` -> upload -> `POST /files/complete`.
-   - Updates node `evidence`, `outputs`, and `status`.
+   - Updates node `evidence`, `outputs`, `status`, and `activityLog`.
 7. **UI receives streaming updates**:
    - Backend re-emits gateway status updates via SSE to the UI.
 
@@ -58,6 +61,9 @@
 - Gateway can access artifact content via context services (load/list artifacts).
 - We store long-lived artifacts in S3 by translating artifacts into backend file items.
 - Evidence is attached as `type: file` items (S3 keys) or `type: text` notes.
+- Artifact filename prefixes:
+  - `evidence__*` attaches to evidence.
+  - default attaches to outputs.
 
 ## Node Reference Resolution
 When a node input includes `{ type: "node" }`:
@@ -72,6 +78,12 @@ When a node input includes `{ type: "node" }`:
 - `approve_nodes`: approvals needed for proposed subnodes and completion.
 - `approve_all`: approvals required before any tool-backed mutation (files, evidence, outputs, or status).
 
+## Approval Lifecycle
+- Gateway creates `approvalRequests[]` entries on the node when approvals are required.
+- Humans resolve approvals via `POST /nodes/{nodeId}/approve`.
+- Gateway polls pending approvals and applies approved actions.
+- Applied approvals are marked `status=applied` for traceability.
+
 ## Auth Strategy (v1)
 - UI uses Cognito JWT to authenticate with backend.
 - Gateway uses `backend_auth_mode`:
@@ -84,6 +96,28 @@ When a node input includes `{ type: "node" }`:
 2. Gateway calls `POST /files/presign` to get upload URL and `s3Key`.
 3. Gateway uploads artifact content to S3 using the presigned URL.
 4. Gateway calls `POST /files/complete` to attach the file to node outputs/evidence.
+
+## Structured Agent Actions (DataPart)
+Agents emit DataParts with:
+```json
+{
+  "type": "glassbox_action",
+  "action": "propose_subnode | add_output | add_evidence | complete_node",
+  "payload": { "..." : "..." },
+  "rationale": "why this action is needed (required when approval is needed)"
+}
+```
+The gateway is the only component that mutates backend state.
+
+## Gateway HTTP API
+- `POST /execute`
+  - Body: `{ "canvasId": "...", "nodeId": "...", "userToken": "Bearer ...", "approvalMode": "..." }`
+  - Optional header: `X-Glassbox-Token` shared secret.
+  - Response: `{ taskId, approvalMode }`
+
+## Activity Log
+- Node field `activityLog[]` records status updates, actions, approvals, artifacts, and errors.
+- Used for streaming and auditability.
 
 ## Deployment Model
 - **Local dev**: `SOLACE_DEV_MODE=true` and `sam run` inside `agent-mesh/`.
@@ -101,6 +135,9 @@ When a node input includes `{ type: "node" }`:
 - `agent-mesh/.env`
 
 ## Gateway Config Keys (Initial)
+- `gateway_host`
+- `gateway_port`
+- `gateway_shared_secret`
 - `backend_api_base_url`
 - `backend_auth_mode`
 - `backend_service_token`
@@ -109,9 +146,9 @@ When a node input includes `{ type: "node" }`:
 - `node_budget_max_children`
 - `node_budget_max_depth`
 - `artifact_upload_mode`
+- `approval_poll_interval_seconds`
 
 ## Next Build Steps
-- Implement gateway input handler (HTTP or queue) for "Execute" events.
-- Implement approval wait/continue loop using task state.
-- Implement artifact-to-S3 upload using backend file endpoints.
-- Add structured action intents from agents (DataPart schema).
+- Add SSE/WebSocket streaming from backend to UI.
+- Add artifact download/presign endpoint for node input files.
+- Expand approval UX in the Electron client.

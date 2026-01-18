@@ -27,6 +27,10 @@ apps:
         - Provide evidence for agent-assigned tasks before completion.
         - Use artifact tools to produce files and drafts, and request the gateway to attach them.
         - If inputs reference other nodes, treat those outputs/evidence as context.
+        - To request state changes, emit a DataPart with:
+          {"type":"glassbox_action","action":"propose_subnode|add_output|add_evidence|complete_node","payload":{...},"rationale":"..."}
+        - Include a rationale for any action that requires approval (subnode creation, completion, or approve_all mode).
+        - For file artifacts, prefix filenames with evidence__ to attach as evidence; otherwise they go to outputs.
       
       tools:
         - group_name: artifact_management

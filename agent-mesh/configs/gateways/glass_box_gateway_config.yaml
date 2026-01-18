@@ -38,6 +38,10 @@ apps:
       # gateway_recursive_embed_depth: 3
 
       # --- GlassBoxGateway Specific Parameters ---
+      gateway_host: "${PLATFORM_API_HOST, 127.0.0.1}"
+      gateway_port: ${PLATFORM_API_PORT, 8001}
+      gateway_shared_secret: "${GLASSBOX_GATEWAY_SHARED_SECRET, \"\"}"
+
       backend_api_base_url: "${GLASSBOX_API_BASE_URL}"
       backend_auth_mode: "${GLASSBOX_BACKEND_AUTH_MODE, service_token}"
       backend_service_token: "${GLASSBOX_SERVICE_TOKEN}"
@@ -48,3 +52,4 @@ apps:
       node_budget_max_depth: ${GLASSBOX_NODE_BUDGET_MAX_DEPTH, 3}
 
       artifact_upload_mode: "${GLASSBOX_ARTIFACT_UPLOAD_MODE, s3}"
+      approval_poll_interval_seconds: ${GLASSBOX_APPROVAL_POLL_INTERVAL_SECONDS, 5}

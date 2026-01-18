@@ -36,6 +36,10 @@ apps:
         - Agent-assigned tasks must include evidence before completion.
         - Inputs may include node references; treat referenced node outputs/evidence as context.
         - Use artifact tools to produce files, then request the gateway to attach evidence/outputs.
+        - To request state changes, emit a DataPart with:
+          {"type":"glassbox_action","action":"propose_subnode|add_output|add_evidence|complete_node","payload":{...},"rationale":"..."}
+        - Include a rationale for any action that requires approval (subnode creation, completion, or approve_all mode).
+        - For file artifacts, prefix filenames with evidence__ to attach as evidence; otherwise they go to outputs.
 
         Artifact Management Guidelines:
         - Review your artifacts and return the ones that matter using artifact_return.
